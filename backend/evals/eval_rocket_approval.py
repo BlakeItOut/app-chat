@@ -1,3 +1,4 @@
+import arcade_arcade_rocket_approval
 from arcade.sdk import ToolCatalog
 from arcade.sdk.eval import (
     EvalRubric,
@@ -6,9 +7,7 @@ from arcade.sdk.eval import (
     SimilarityCritic,
     tool_eval,
 )
-
-import arcade_PreApproval
-from arcade_PreApproval.tools.hello import say_hello
+from arcade_arcade_rocket_approval.tools.hello import say_hello
 
 # Evaluation rubric
 rubric = EvalRubric(
@@ -18,15 +17,15 @@ rubric = EvalRubric(
 
 
 catalog = ToolCatalog()
-catalog.add_module(arcade_PreApproval)
+catalog.add_module(arcade_arcade_rocket_approval)
 
 
 @tool_eval()
-def PreApproval_eval_suite() -> EvalSuite:
+def arcade_rocket_approval_eval_suite() -> EvalSuite:
     suite = EvalSuite(
-        name="PreApproval Tools Evaluation",
+        name="arcade_rocket_approval Tools Evaluation",
         system_message=(
-            "You are an AI assistant with access to PreApproval tools. "
+            "You are an AI assistant with access to arcade_rocket_approval tools. "
             "Use them to help the user with their tasks."
         ),
         catalog=catalog,
@@ -36,14 +35,19 @@ def PreApproval_eval_suite() -> EvalSuite:
     suite.add_case(
         name="Saying hello",
         user_message="He's actually right here, say hi to him!",
-        expected_tool_calls=[ExpectedToolCall(func=say_hello, args={"name": "John Doe"})],
+        expected_tool_calls=[
+            ExpectedToolCall(func=say_hello, args={"name": "John Doe"})
+        ],
         rubric=rubric,
         critics=[
             SimilarityCritic(critic_field="name", weight=0.5),
         ],
         additional_messages=[
             {"role": "user", "content": "My friend's name is John Doe."},
-            {"role": "assistant", "content": "It is great that you have a friend named John Doe!"},
+            {
+                "role": "assistant",
+                "content": "It is great that you have a friend named John Doe!",
+            },
         ],
     )
 
