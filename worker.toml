@@ -5,6 +5,6 @@ id = "rocket-tools"
 enabled = true
 timeout = 30
 retries = 1
-secret = "55749d35f3e22567663526783655e730"
+secret = "${env: ARCADE_WORKER_SECRET}"
 [worker.local_source]
 packages = [ "./backend",]

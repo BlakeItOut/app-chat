@@ -48,6 +48,7 @@ async def get_current_user(
 				},
 			)
 	except (IndexError, InvalidTokenError, ConnectionError) as e:
+		logging.exception('An error occurred during authentication', e, stack_info=True, exc_info=True)
 		raise AUTH_EXCEPTION from e
 	if response.status_code != 200:
 		raise AUTH_EXCEPTION

@@ -58,7 +58,6 @@ def make_graph(config: RunnableConfig) -> CompiledStateGraph:
     all_tools = [
         "RocketApproval.StartApplication",
         "RocketApproval.GetPurchaseApplicationStatus",
-        "RocketApproval.SetBuyingPlans",
         "RocketApproval.SetHomeDetails",
         "RocketApproval.SetHomePrice",
         "RocketApproval.SetPersonalInfo",

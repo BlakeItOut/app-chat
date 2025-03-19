@@ -49,26 +49,6 @@ def get_purchase_application_status(
 
 
 @tool
-def set_buying_plans(
-    context: ToolContext,
-    rm_loan_id: Annotated[str, "Rocket Mortgage Loan ID"],
-    details: Annotated[str, "Buying Plans"],
-) -> Annotated[str, "status"]:
-    """
-    Update the 'home-info/buying-plans' for the application.
-    POST /api/home-info/buying-plans with JSON including rmLoanId.
-    """
-    endpoint = "/api/home-info/buying-plans"
-    payload = {"rmLoanId": rm_loan_id, "buyingPlans": details}
-    headers = {"Content-Type": "application/json"}
-    try:
-        send_request(endpoint, "POST", json=payload, headers=headers)
-        return "Buying plans updated"
-    except (requests.exceptions.RequestException, ValueError):
-        return "Error updating buying plans"
-
-
-@tool
 def set_home_details(
     context: ToolContext,
     rm_loan_id: Annotated[str, "Rocket Mortgage Loan ID"],
