@@ -1,11 +1,10 @@
 from typing import Any, Dict, List, Literal
 
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import SystemMessage, ToolMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.func import entrypoint, task
-from langgraph.graph import StateGraph
+from langgraph.graph import MessagesState, StateGraph
 from langgraph.types import Command, interrupt
-from pydantic import BaseModel, Field
 
 # Import the tools from purchase.py
 from arcade_rocket_approval.tools.purchase import (
@@ -33,28 +32,10 @@ model = load_chat_model("openai/o3-mini")
 # 2. Define your shared state schema
 ################################################################################
 
-# We'll store the user's entire state, or a subset, in a dictionary.
-# This includes the "context" from schema.json plus additional fields
-# that we want to track. For example, picked route, missing fields, etc.
 
-# For brevity, we'll just do a simple dictionary with a "messages" key
-# for the conversation history, and a "nav" key for route state, etc.
+class MortgageState(MessagesState):
+    rmLoanId: str | None = None
 
-# Often you'd define a Pydantic model for strongly-typed state; here's a quick example:
-
-
-class MortgageState(BaseModel):
-    messages: List[Dict[str, Any]] = Field(default_factory=list)
-    rmLoanId: str = ""
-    # You can copy in the entire context structure from schema.json if you prefer:
-    # context: Dict[str, Any] = Field(default_factory=dict)
-    # ...
-    # For demonstration, we keep it minimal.
-
-
-################################################################################
-# 3. Define route node functions (tasks)
-################################################################################
 
 
 @task
@@ -62,39 +43,38 @@ def purchase_welcome_node(
     state: MortgageState,
 ) -> Command[Literal["buying_plans_node", "__end__"]]:
     """
-    This node corresponds to 'purchase/welcome'
-    We'll check if we have an rmLoanId; if not, we might call start_application.
+    This node corresponds to 'purchase/welcome'.
+    We'll check if we have an rmLoanId; if not, we might call start_application
+    after parsing the user input for yes/no.
     Then we either move on to the next route or end.
     """
-    # Prompt for missing data if needed, or greet the user.
-    # The simplest example: we'll check if user wants to start an application.
-
-    # Insert a SystemMessage or something to the conversation:
+    # Greet the user and ask if they want to begin
     sys_msg = SystemMessage(
         content="You're Rocket Mortgage bot. Welcome the user and ask if they want to begin the application."
     )
-    state.messages.append({"role": "system", "content": sys_msg.content})
+    state["messages"].append({"role": "system", "content": sys_msg.content})
 
-    # Interrupt to get user input
-    user_input = interrupt("Ready to start your Purchase application? (yes/no)")
-    state.messages.append({"role": "user", "content": user_input})
+    # Prompt user
+    user_input = interrupt(value="Ready to start your Purchase application? (yes/no)")
+    state["messages"].append({"role": "user", "content": user_input})
 
-    # For demonstration, we assume user said "Yes," so we call start_application
-    # A more robust approach would parse user_input to see if they said yes/no
-    rm_loan_id = start_application()
+    # A robust check for yes/no
+    user_reply_cleaned = user_input.value.strip().lower()
+    if user_reply_cleaned.startswith("y"):
+        rm_loan_id = start_application()
 
-    if rm_loan_id:
-        state.rmLoanId = rm_loan_id
-        state.messages.append(
+        # Next step in the nav is usually "purchase/home-info/buying-plans"
+        return Command(goto="buying_plans_node", update={"rmLoanId": rm_loan_id})
+    else:
+        # If user said "no", we might just end or do something else
+        state["messages"].append(
             {
-                "role": "tool",
-                "content": f"rmLoanId created: {rm_loan_id}",
-                "tool_call_id": "start_application_call",
+                "role": "system",
+                "content": "Understood. We won't start the application now.",
             }
         )
-
-    # Next step in the nav is usually "purchase/home-info/buying-plans"
-    return Command(goto="buying_plans_node", update={})
+        return Command(goto="__end__")
+    return state
 
 
 @task
