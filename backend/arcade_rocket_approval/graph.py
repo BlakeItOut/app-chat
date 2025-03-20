@@ -109,7 +109,7 @@ def make_graph(config: Config) -> CompiledStateGraph:
     decision_chain = make_decision_chain(model)
 
     # A small function that calls the chain, then returns "go" or "end"
-    def decide_flow_node(state: MortgageState) -> str:
+    def decide_application_subgraph(state: MortgageState) -> str:
         """
         Decide whether to run the purchase_flow subgraph by calling a short chain to see
         if user wants to submit a mortgage application.
@@ -134,14 +134,14 @@ def make_graph(config: Config) -> CompiledStateGraph:
     # Use a conditional edge to decide whether to run flow_node
     graph.add_conditional_edges(
         "react_agent",
-        decide_flow_node,  # returns "apply" or "end" after consulting the model
+        decide_application_subgraph,  # returns "apply" or "end" after consulting the model
         {
             "apply": "application_subgraph",
             "end": END,
         },
     )
 
-    # After flow_node, end the graph
+    # After application_subgraph, end the graph
     graph.add_edge("application_subgraph", END)
 
     compiled_graph = graph.compile(debug=True, checkpointer=checkpointer)

@@ -10,7 +10,6 @@ from langgraph.types import Command, interrupt
 from arcade_rocket_approval.tools.purchase import (
     do_soft_credit_pull,
     get_purchase_application_status,
-    set_buying_plans,
     set_contact_info,
     set_funds,
     set_home_details,
@@ -40,7 +39,7 @@ class MortgageState(MessagesState):
 
 def purchase_welcome_node(
     state: MortgageState,
-) -> Command[Literal["buying_plans_node", "__end__"]]:
+) -> Command[Literal["home_details_node", "__end__"]]:
     """
     This node corresponds to 'purchase/welcome'.
     We'll check if we have an rmLoanId; if not, we might call start_application
@@ -61,7 +60,7 @@ def purchase_welcome_node(
         rm_loan_id = start_application()
         # Next step in the nav is usually "purchase/home-info/buying-plans"
         return Command(
-            goto="buying_plans_node",
+            goto="home_details_node",
             update={"rmLoanId": rm_loan_id, "messages": messages},
         )
     else:
@@ -71,29 +70,6 @@ def purchase_welcome_node(
             AIMessage(content="Understood. We won't start the application now."),
         ]
         return Command(goto="__end__", update={"messages": new_messages})
-
-
-def buying_plans_node(
-    state: MortgageState,
-) -> Command[Literal["home_details_node", "__end__"]]:
-    """
-    This node corresponds to 'purchase/home-info/buying-plans'.
-    Suppose the user needs to confirm some fields (e.g. rmLoanId).
-    Then we proceed to 'purchase/home-info/buying-plans/home-details'
-    """
-    # Ask user more questions, gather data, etc.
-    user_prompt = "What is your plan for buying a home? Or timeframe to purchase?"
-    user_input = interrupt(user_prompt)
-    messages = [
-        AIMessage(content=user_prompt),
-        HumanMessage(content=user_input["value"]),
-    ]
-
-    if state["rmLoanId"] and user_input.strip():
-        status = set_buying_plans(rm_loan_id=state["rmLoanId"], details=user_input)
-
-    return Command(goto="home_details_node", update={"messages": messages})
-
 
 
 def home_details_node(
@@ -330,7 +306,6 @@ def affordability_amount_node(state: MortgageState) -> Command[Literal["__end__"
 builder = StateGraph(MortgageState)
 
 builder.add_node("purchase_welcome_node", purchase_welcome_node)
-builder.add_node("buying_plans_node", buying_plans_node)
 builder.add_node("home_details_node", home_details_node)
 builder.add_node("home_price_node", home_price_node)
 builder.add_node("personal_info_node", personal_info_node)
@@ -347,8 +322,7 @@ builder.add_node("affordability_amount_node", affordability_amount_node)
 builder.set_entry_point("purchase_welcome_node")
 
 # Now link the edges so the graph knows how to transition:
-builder.add_edge("purchase_welcome_node", "buying_plans_node")
-builder.add_edge("buying_plans_node", "home_details_node")
+builder.add_edge("purchase_welcome_node", "home_details_node")
 builder.add_edge("home_details_node", "home_price_node")
 builder.add_edge("home_price_node", "personal_info_node")
 builder.add_edge("personal_info_node", "contact_info_node")
@@ -360,5 +334,4 @@ builder.add_edge("funds_node", "credit_info_node")
 builder.add_edge("credit_info_node", "pull_credit_node")
 builder.add_edge("pull_credit_node", "affordability_amount_node")
 
-# __end__ will be the final terminal node (we do not define a node for it, so it auto-happens)
 subgraph = builder.compile(checkpointer=MemorySaver())
