@@ -156,7 +156,6 @@ def get_user_info_agent(
         user_info = structured_output_model.invoke(
             {"messages": messages[0].content}, config=config
         )
-        print(user_info, "--------------------------------")
         return Command(
             goto="__end__",
             update={"user_info": user_info, "messages": messages},
@@ -166,14 +165,16 @@ def get_user_info_agent(
     workflow = StateGraph(MortgageInfoState)
 
     # Add nodes
-    workflow.add_node("gather_info_node", gather_info_node)
     workflow.add_node("tools", ToolNode(tools))
     workflow.add_node("process_info_node", process_info_node)
+    workflow.add_node("gather_info_node", gather_info_node)
 
-    # Set entry point
+    workflow.add_edge("gather_info_node", "tools")
+    workflow.add_edge("tools", "process_info_node")
+    workflow.add_edge("process_info_node", END)
+
     workflow.set_entry_point("gather_info_node")
 
-    # Compile the graph
     graph = workflow.compile(checkpointer=checkpointer, debug=True)
 
     return graph
