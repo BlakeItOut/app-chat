@@ -1,22 +1,40 @@
 import asyncio
 import os
 import uuid
+from typing import TYPE_CHECKING, Literal
 
 from dotenv import load_dotenv
-from langchain.output_parsers import BooleanOutputParser
-from langchain.prompts import PromptTemplate
 from langchain_arcade import ToolManager
 from langchain_core.language_models import BaseChatModel
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import BaseTool
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import END, StateGraph
+from langgraph.graph import END, MessagesState, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.prebuilt import ToolNode, create_react_agent
-from pydantic import Field
+from langgraph.types import Command, interrupt
 
-# Import your subgraph and MortgageState from flow.py
-from arcade_rocket_approval.flow import MortgageState, subgraph
+from arcade_rocket_approval.agent.info_agent import get_user_info_agent
+from arcade_rocket_approval.api import (
+    Address,
+    BankingAsset,
+    CurrentLivingSituation,
+    PhoneNumber,
+    PrimaryAssets,
+    RocketUserContext,
+    do_soft_credit_pull,
+    set_contact_info,
+    set_funds,
+    set_income,
+    set_military_status,
+    set_personal_info,
+)
 from arcade_rocket_approval.utils import load_chat_model
+
+if TYPE_CHECKING:
+    from arcade_rocket_approval.graph import MortgageState
+
 
 load_dotenv()
 
@@ -24,126 +42,749 @@ arcade_api_key = os.environ.get("ARCADE_API_KEY")
 arcade_base_url = os.environ.get("ARCADE_BASE_URL")
 openai_api_key = os.environ.get("OPENAI_API_KEY")
 
-CACHED_TOOLS = {}
-
+INFO_MODEL = "openai/gpt-4o"
+MODEL = "openai/o3-mini"
+CACHED_TOOLS = []
 all_tools = [
     "RocketApproval.RetrieveUserInformationFromGoogle",
 ]
 
-checkpointer = MemorySaver()
+CHECKPOINTER = MemorySaver()
+
+# Set up tools and models
+TOOLS_MANAGER = ToolManager(api_key=arcade_api_key, base_url=arcade_base_url)
+
+if not CACHED_TOOLS:
+    TOOLS_MANAGER.init_tools(tools=all_tools)
+    CACHED_TOOLS = TOOLS_MANAGER.to_langchain()
 
 
-class Config(RunnableConfig):
-    user_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+# Run info gathering agent to collect user information
+# TODO cache this
+info_agent = get_user_info_agent(
+    model=load_chat_model(INFO_MODEL),
+    tools=CACHED_TOOLS,
+    checkpointer=CHECKPOINTER,
+)
 
 
-###############################################################################
-# 1) Define a "FlowNode" that runs the subgraph
-###############################################################################
-def run_purchase_flow(state: MortgageState):
-    """
-    Runs the compiled subgraph from `purchase_flow` for the user's current step.
-    The subgraph returns the updated state, which we then pass back.
-    """
-    updated_state = subgraph.invoke(input=state)  # runs one node or until interrupt
-    return updated_state.dict()
+class MortgageState(MessagesState):
+    rmLoanId: str | None = None
+    user_id: str | None = None
+    user_info: RocketUserContext | None = None
 
 
-###############################################################################
-# 2) Use an LLM to decide whether to run the "flow_node"
-###############################################################################
-def make_decision_chain(model: BaseChatModel):
-    """
-    Returns a small chain that interprets whether the user wants to submit a mortgage
-    application. You can customize the prompt as needed.
-    """
-    prompt = PromptTemplate.from_template(
-        """
-        Here's the context of a conversation between a user and a mortgage assistant:
+def create_config(user_id: str = None) -> RunnableConfig:
+    """Create a RunnableConfig with necessary checkpoint configuration."""
+    # TODO replace with langgraphcloud auth (supabase or auth0)
+    user_id = user_id or str(uuid.uuid4())
 
-        {context}
-
-        Now, the user has sent the following message:
-
-        {message}
-
-        Answer 'yes' if they want to submit a mortgage application, or 'no' if they do not.
-        """
-    )
-    return prompt | model | BooleanOutputParser()
-
-
-###############################################################################
-# 3) Build the main React agent with Tools, add a conditional edge
-###############################################################################
-def make_graph(config: Config) -> CompiledStateGraph:
-    global CACHED_TOOLS
-
-    # set a user_id if it's not already set
-    config["configurable"] = config.get("configurable", {})
-    config["configurable"]["user_id"] = config["configurable"].get(
-        "user_id", str(uuid.uuid4())
+    # Create config with all required checkpoint parameters
+    config = RunnableConfig(
+        user_id=user_id,
+        thread_id=str(uuid.uuid4()),
+        checkpoint_ns="mortgage_approval_agent",
+        checkpoint_id=str(uuid.uuid4()),
     )
 
-    manager = ToolManager(api_key=arcade_api_key, base_url=arcade_base_url)
+    return config
 
-    if not CACHED_TOOLS:
-        manager.init_tools(tools=all_tools)
-        CACHED_TOOLS = manager.to_langchain()
 
-    model = load_chat_model("openai/o3-mini")
+def verify_user_info_node(
+    state: MortgageState,
+) -> Command[Literal["start_application_node", "info_gathering_node"]]:
+    """
+    Presents the collected user information to the user for verification.
+    If verified, proceed to start_application_node, otherwise return to info_gathering_node.
+    """
+    if not state.get("user_info"):
+        # If no user info available, we need to gather it
+        return Command(goto="info_gathering_node", update={})
 
-    system_prompt = (
-        "You are a helpful assistant that can handle rocket mortgage application logic. "
-        ""
-    )
+    # Format user info for display
+    user_info = state["user_info"]
+    info_display = user_info.info_display()
 
-    react_agent_node = create_react_agent(
-        model=model,
-        tools=ToolNode(tools=CACHED_TOOLS),
-        prompt=system_prompt,
-        checkpointer=checkpointer,
-    )
+    # Interrupt to get user verification
+    user_input = interrupt(info_display)
+    user_reply = user_input["value"].strip().lower()
 
-    # Create our "decision chain" to interpret user's message
-    decision_chain = make_decision_chain(model)
-
-    # A small function that calls the chain, then returns "go" or "end"
-    def decide_application_subgraph(state: MortgageState) -> str:
-        """
-        Decide whether to run the purchase_flow subgraph by calling a short chain to see
-        if user wants to submit a mortgage application.
-        """
-        context = "\n".join([f"message: {m}" for m in state["messages"]])
-        message = state["messages"][-1]
-
-        user_wants_to_submit = decision_chain.invoke(
-            {"context": context, "message": message}
+    if user_reply.startswith("y"):
+        return Command(
+            goto="start_application_node",
+            update={
+                "messages": [
+                    AIMessage(content=info_display),
+                    HumanMessage(content=user_reply),
+                    AIMessage(
+                        content="Thank you for confirming. Let's start your application."
+                    ),
+                ]
+            },
         )
-        return "apply" if user_wants_to_submit else "end"
+    else:
+        return Command(
+            goto="info_gathering_node",
+            update={
+                "messages": [
+                    AIMessage(content=info_display),
+                    HumanMessage(content=user_reply),
+                    AIMessage(content="Let's update your information."),
+                ]
+            },
+        )
 
-    graph = StateGraph(MortgageState, config_schema=Config)
 
-    # Add nodes
-    graph.add_node("react_agent", react_agent_node)
-    graph.add_node("application_subgraph", subgraph)
+def start_application_node(
+    state: MortgageState,
+) -> Command[Literal["home_details_node", "info_gathering_node", "__end__"]]:
+    """
+    Creates a new mortgage application using the collected user information.
+    """
+    # Create welcome message
+    user_prompt = "Ready to start your Purchase application? (yes/no)"
+    user_input = interrupt(user_prompt)
+    messages = [
+        AIMessage(content=user_prompt),
+        HumanMessage(content=user_input["value"]),
+    ]
 
-    # Entry point
-    graph.set_entry_point("react_agent")
+    # A robust check for yes/no
+    user_reply_cleaned = user_input["value"].strip().lower()
+    if not user_reply_cleaned.startswith("y"):
+        # If user said "no", we end the application process
+        new_messages = [
+            HumanMessage(content=user_reply_cleaned),
+            AIMessage(content="Understood. We won't start the application now."),
+        ]
+        return Command(goto="__end__", update={"messages": new_messages})
 
-    # Use a conditional edge to decide whether to run flow_node
-    graph.add_conditional_edges(
-        "react_agent",
-        decide_application_subgraph,  # returns "apply" or "end" after consulting the model
-        {
-            "apply": "application_subgraph",
-            "end": END,
+    # Mock a start_application function since it wasn't provided
+    # In a real implementation, this would call an API
+    try:
+        # Here, we'd call the API to start a new application
+        # For now, we'll just simulate it with a mock ID
+        rm_loan_id = f"RM{hash(state['user_info'].email) % 10000:04d}"
+
+        return Command(
+            goto="home_details_node",
+            update={"rmLoanId": rm_loan_id, "messages": messages},
+        )
+    except Exception as e:
+        error_messages = messages + [
+            AIMessage(
+                content=f"I encountered an error starting your application: {str(e)}. Let's gather more information."
+            )
+        ]
+        return Command(
+            goto="info_gathering_node",
+            update={"messages": error_messages, "error": str(e)},
+        )
+
+
+def home_details_node(
+    state: MortgageState,
+) -> Command[Literal["home_price_node", "info_gathering_node", "__end__"]]:
+    """
+    This node corresponds to 'purchase/home-info/buying-plans/home-details'.
+    For example, ask for home value, monthly payment, etc.
+    """
+    user_prompt = "Share your estimated home value and desired monthly payment."
+    user_input = interrupt(user_prompt)
+    messages = [
+        AIMessage(content=user_prompt),
+        HumanMessage(content=user_input["value"]),
+    ]
+
+    try:
+        # Process home details
+        # This would normally call an API endpoint
+        # set_home_details(rm_loan_id=state["rmLoanId"], details=user_input["value"])
+
+        # Next route is 'purchase/home-info/buying-plans/home-price'
+        return Command(goto="home_price_node", update={"messages": messages})
+    except Exception as e:
+        error_messages = messages + [
+            AIMessage(
+                content=f"I encountered an error with your home details: {str(e)}. Let's gather more information."
+            )
+        ]
+        return Command(
+            goto="info_gathering_node",
+            update={"messages": error_messages, "error": str(e)},
+        )
+
+
+def home_price_node(
+    state: MortgageState,
+) -> Command[Literal["personal_info_node", "info_gathering_node", "__end__"]]:
+    """
+    This node corresponds to 'purchase/home-info/buying-plans/home-price'.
+    Ask for a bit more info about the purchase price if needed.
+    """
+    user_prompt = "Do you know your target home price?"
+    user_input = interrupt(user_prompt)
+    messages = [
+        AIMessage(content=user_prompt),
+        HumanMessage(content=user_input["value"]),
+    ]
+
+    try:
+        # Process home price info
+        # set_home_price(rm_loan_id=state["rmLoanId"], price_info=user_input["value"])
+
+        # Next big section is "purchase/personal-info" (the interstitial)
+        return Command(goto="personal_info_node", update={"messages": messages})
+    except Exception as e:
+        error_messages = messages + [
+            AIMessage(
+                content=f"I encountered an error with your home price information: {str(e)}. Let's gather more information."
+            )
+        ]
+        return Command(
+            goto="info_gathering_node",
+            update={"messages": error_messages, "error": str(e)},
+        )
+
+
+def personal_info_node(
+    state: MortgageState,
+) -> Command[Literal["contact_info_node", "info_gathering_node", "__end__"]]:
+    """
+    This would correspond to 'purchase/personal-info' before we jump to contact info routes, etc.
+    """
+    # Extract user info
+    user_info = state.get("user_info", {})
+
+    try:
+        if (
+            state["rmLoanId"]
+            and hasattr(user_info, "first_name")
+            and hasattr(user_info, "last_name")
+        ):
+            # Call API to set personal info using collected user data
+            response = set_personal_info(
+                rm_loan_id=state["rmLoanId"],
+                first_name=user_info.first_name,
+                last_name=user_info.last_name,
+                date_of_birth=getattr(user_info, "date_of_birth", None),
+                marital_status=getattr(user_info, "marital_status", None),
+                is_spouse_on_loan=getattr(user_info, "is_spouse_on_loan", None),
+            )
+
+            if response.status == "error":
+                return Command(
+                    goto="info_gathering_node",
+                    update={
+                        "messages": [
+                            AIMessage(
+                                content=f"I encountered an error with your personal information: {response.message}. Let's gather more information."
+                            )
+                        ],
+                        "error": response.message,
+                    },
+                )
+
+        # User prompt for additional info if needed
+        user_prompt = "Next, let's handle personal info. Enter marital status or any relevant info."
+        user_input = interrupt(user_prompt)
+        messages = [
+            AIMessage(content=user_prompt),
+            HumanMessage(content=user_input["value"]),
+        ]
+
+        return Command(goto="contact_info_node", update={"messages": messages})
+    except Exception as e:
+        error_messages = [
+            AIMessage(
+                content=f"I encountered an error with your personal information: {str(e)}. Let's gather more information."
+            )
+        ]
+        return Command(
+            goto="info_gathering_node",
+            update={"messages": error_messages, "error": str(e)},
+        )
+
+
+def contact_info_node(
+    state: MortgageState,
+) -> Command[Literal["military_status_node", "info_gathering_node", "__end__"]]:
+    """
+    'purchase/personal-info/contact-info'
+    Ask user for phone, email, etc.
+    """
+    # Extract user info
+    user_info = state.get("user_info", {})
+
+    try:
+        if state["rmLoanId"] and hasattr(user_info, "email"):
+            # Extract phone number components from user info
+            phone_str = getattr(user_info, "phone_number", "")
+
+            # Create phone number object
+            phone = None
+            if phone_str:
+                # This is a simplification - in reality you'd want to parse the phone string properly
+                phone_parts = (
+                    phone_str.replace("(", "")
+                    .replace(")", "")
+                    .replace("-", "")
+                    .replace(" ", "")
+                )
+                if len(phone_parts) == 10:
+                    phone = PhoneNumber(
+                        area_code=phone_parts[:3],
+                        prefix=phone_parts[3:6],
+                        line=phone_parts[6:],
+                    )
+
+                # Call API to set contact info
+                response = set_contact_info(
+                    rm_loan_id=state["rmLoanId"],
+                    first_name=user_info.first_name,
+                    last_name=user_info.last_name,
+                    email=user_info.email,
+                    phone_number=phone,
+                )
+
+                if response.status == "error":
+                    return Command(
+                        goto="info_gathering_node",
+                        update={
+                            "messages": [
+                                AIMessage(
+                                    content=f"I encountered an error with your contact information: {response.message}. Let's gather more information."
+                                )
+                            ],
+                            "error": response.message,
+                        },
+                    )
+
+        # User prompt for confirmation or additional info
+        user_prompt = "Please confirm your email and phone number: is this correct? If not, please provide them comma separated."
+        user_input = interrupt(user_prompt)
+        messages = [
+            AIMessage(content=user_prompt),
+            HumanMessage(content=user_input["value"]),
+        ]
+
+        return Command(goto="military_status_node", update={"messages": messages})
+    except Exception as e:
+        error_messages = [
+            AIMessage(
+                content=f"I encountered an error with your contact information: {str(e)}. Let's gather more information."
+            )
+        ]
+        return Command(
+            goto="info_gathering_node",
+            update={"messages": error_messages, "error": str(e)},
+        )
+
+
+def military_status_node(
+    state: MortgageState,
+) -> Command[Literal["finances_node", "info_gathering_node", "__end__"]]:
+    """
+    'purchase/personal-info/military-status'
+    Possibly ask if user is military, etc.
+    Then we proceed to 'finances'...
+    """
+    # Extract user info
+    user_info = state.get("user_info", {})
+
+    try:
+        military_status = getattr(user_info, "military_status", None)
+        if state["rmLoanId"] and military_status:
+            # Call API to set military status
+            response = set_military_status(
+                rm_loan_id=state["rmLoanId"], military_status=military_status
+            )
+
+            if response.status == "error":
+                return Command(
+                    goto="info_gathering_node",
+                    update={
+                        "messages": [
+                            AIMessage(
+                                content=f"I encountered an error with your military status: {response.message}. Let's gather more information."
+                            )
+                        ],
+                        "error": response.message,
+                    },
+                )
+
+        # User prompt for confirmation or additional info
+        user_prompt = (
+            "Are you or a co-borrower associated with the Military? Yes or No?"
+        )
+        user_input = interrupt(user_prompt)
+        messages = [
+            AIMessage(content=user_prompt),
+            HumanMessage(content=user_input["value"]),
+        ]
+
+        return Command(goto="finances_node", update={"messages": messages})
+    except Exception as e:
+        error_messages = [
+            AIMessage(
+                content=f"I encountered an error with your military status: {str(e)}. Let's gather more information."
+            )
+        ]
+        return Command(
+            goto="info_gathering_node",
+            update={"messages": error_messages, "error": str(e)},
+        )
+
+
+def finances_node(
+    state: MortgageState,
+) -> Command[Literal["income_node", "info_gathering_node", "__end__"]]:
+    """
+    'purchase/finances' as an interstitial or direct route
+    """
+    user_prompt = "Let's talk about finances. Press enter to continue."
+    user_input = interrupt(user_prompt)
+    messages = [
+        AIMessage(content=user_prompt),
+        HumanMessage(content=user_input["value"]),
+    ]
+
+    return Command(goto="income_node", update={"messages": messages})
+
+
+def income_node(
+    state: MortgageState,
+) -> Command[Literal["funds_node", "info_gathering_node", "__end__"]]:
+    """
+    'purchase/finances/income'
+    """
+    # Extract user info
+    user_info = state.get("user_info", {})
+
+    try:
+        annual_income = getattr(user_info, "annual_income", None)
+        if state["rmLoanId"] and annual_income:
+            # Call API to set income
+            response = set_income(
+                rm_loan_id=state["rmLoanId"],
+                annual_income=annual_income,
+                income_type="Employment",  # Default to employment
+            )
+
+            if response.status == "error":
+                return Command(
+                    goto="info_gathering_node",
+                    update={
+                        "messages": [
+                            AIMessage(
+                                content=f"I encountered an error with your income information: {response.message}. Let's gather more information."
+                            )
+                        ],
+                        "error": response.message,
+                    },
+                )
+
+        # User prompt for confirmation or additional info
+        user_prompt = "What is your annual income?"
+        user_input = interrupt(user_prompt)
+        messages = [
+            AIMessage(content=user_prompt),
+            HumanMessage(content=user_input["value"]),
+        ]
+
+        return Command(goto="funds_node", update={"messages": messages})
+    except Exception as e:
+        error_messages = [
+            AIMessage(
+                content=f"I encountered an error with your income information: {str(e)}. Let's gather more information."
+            )
+        ]
+        return Command(
+            goto="info_gathering_node",
+            update={"messages": error_messages, "error": str(e)},
+        )
+
+
+def funds_node(
+    state: MortgageState,
+) -> Command[Literal["credit_info_node", "info_gathering_node", "__end__"]]:
+    """
+    'purchase/finances/funds'
+    """
+    user_prompt = "How will you fund your down payment? (savings, gift, etc.)"
+    user_input = interrupt(user_prompt)
+    messages = [
+        AIMessage(content=user_prompt),
+        HumanMessage(content=user_input["value"]),
+    ]
+
+    try:
+        if state["rmLoanId"] and user_input["value"].strip():
+            # Basic funds processing - in a real implementation you'd parse the user's input
+            # and create proper objects based on their response
+            if "savings" in user_input["value"].lower():
+                # Create a banking asset for savings
+                primary_assets = PrimaryAssets(
+                    assets=[
+                        BankingAsset(
+                            bank_amount=50000,  # This would be extracted from user input
+                            bank_name="User's Bank",
+                            type_code="Savings",
+                        )
+                    ]
+                )
+
+                # Call API to set funds
+                response = set_funds(
+                    rm_loan_id=state["rmLoanId"], primary_assets=primary_assets
+                )
+
+                if response.status == "error":
+                    return Command(
+                        goto="info_gathering_node",
+                        update={
+                            "messages": [
+                                AIMessage(
+                                    content=f"I encountered an error with your funds information: {response.message}. Let's gather more information."
+                                )
+                            ],
+                            "error": response.message,
+                        },
+                    )
+
+        # Move on to credit info
+        return Command(goto="credit_info_node", update={"messages": messages})
+    except Exception as e:
+        error_messages = messages + [
+            AIMessage(
+                content=f"I encountered an error processing your funds information: {str(e)}. Let's gather more information."
+            )
+        ]
+        return Command(
+            goto="info_gathering_node",
+            update={"messages": error_messages, "error": str(e)},
+        )
+
+
+def credit_info_node(
+    state: MortgageState,
+) -> Command[Literal["pull_credit_node", "info_gathering_node", "__end__"]]:
+    """
+    'purchase/credit-info'
+    """
+    user_prompt = "We'll talk about your credit info next. Press enter to continue."
+    user_input = interrupt(user_prompt)
+    messages = [
+        AIMessage(content=user_prompt),
+        HumanMessage(content=user_input["value"]),
+    ]
+
+    return Command(goto="pull_credit_node", update={"messages": messages})
+
+
+def pull_credit_node(
+    state: MortgageState,
+) -> Command[Literal["affordability_amount_node", "info_gathering_node", "__end__"]]:
+    """
+    'purchase/credit-info/birthdate-SSN'
+    Ask for minimal data to do a soft credit pull, if needed.
+    """
+    user_prompt = "Enter your birthdate and last 4 of SSN, comma separated."
+    user_input = interrupt(user_prompt)
+    messages = [
+        AIMessage(content=user_prompt),
+        HumanMessage(content=user_input["value"]),
+    ]
+
+    try:
+        if state["rmLoanId"] and "," in user_input["value"]:
+            parts = user_input["value"].split(",", 1)
+            birthdate = parts[0].strip()
+            ssn_last4 = parts[1].strip()
+
+            # Call API to do soft credit pull
+            response = do_soft_credit_pull(
+                rm_loan_id=state["rmLoanId"], birthdate=birthdate, ssn_last4=ssn_last4
+            )
+
+            if response.status == "error":
+                return Command(
+                    goto="info_gathering_node",
+                    update={
+                        "messages": [
+                            AIMessage(
+                                content=f"I encountered an error with your credit information: {response.message}. Let's gather more information."
+                            )
+                        ],
+                        "error": response.message,
+                    },
+                )
+
+        # Transition to final or to "purchase/chat-with-expert/affordability-amount"
+        return Command(goto="affordability_amount_node", update={"messages": messages})
+    except Exception as e:
+        error_messages = messages + [
+            AIMessage(
+                content=f"I encountered an error processing your credit information: {str(e)}. Let's gather more information."
+            )
+        ]
+        return Command(
+            goto="info_gathering_node",
+            update={"messages": error_messages, "error": str(e)},
+        )
+
+
+def affordability_amount_node(state: MortgageState) -> Command[Literal["__end__"]]:
+    """
+    'purchase/chat-with-expert/affordability-amount'
+    Possibly handle final route or chat with expert.
+    """
+    user_prompt = "Let's see your affordability range. Press enter to finalize."
+    user_input = interrupt(user_prompt)
+    messages = [
+        AIMessage(content=user_prompt),
+        HumanMessage(content=user_input["value"]),
+        AIMessage(
+            content="Great! Your mortgage application is now complete. A Rocket Mortgage expert will be in touch with you shortly to discuss next steps."
+        ),
+    ]
+
+    # We can end the flow or loop back. For now, let's just end.
+    return Command(goto="__end__", update={"messages": messages})
+
+
+def info_gathering_node(
+    state: MortgageState,
+) -> Command[Literal["verify_user_info_node"]]:
+    """
+    This node initializes or runs the information gathering agent.
+    Once information is collected, it transitions to verification.
+    """
+
+    if state.get("error"):
+        # Add error message to guide the agent to fix the issue
+        state["messages"].append(
+            AIMessage(
+                content=f"I need to correct some information: {state['error']}. Please help me collect the right information."
+            )
+        )
+
+    # Run the info gathering agent
+    result = info_agent.invoke(input=state)
+
+    # Extract the user info from the result
+    user_info = result.get("user_info")
+
+    # Move to verification
+    return Command(
+        goto="verify_user_info_node",
+        update={
+            "user_info": user_info,
+            "messages": result.get("messages", []),
         },
     )
 
-    # After application_subgraph, end the graph
-    graph.add_edge("application_subgraph", END)
 
-    compiled_graph = graph.compile(debug=True, checkpointer=checkpointer)
-    compiled_graph.name = "Rocket Mortgage Agent"
-    return compiled_graph
+################################################################################
+# Build the entire Workflow
+################################################################################
+
+
+def build_mortgage_workflow(
+    model: BaseChatModel, tools: list[BaseTool], checkpointer: MemorySaver, **kwargs
+):
+    """
+    Builds and returns the complete mortgage application workflow.
+
+    Args:
+        model: The language model to use for the workflow
+        tools: The tools to use for the workflow
+        checkpointer: The checkpointer to use for state persistence
+        **kwargs: Additional arguments to pass to the graph compiler
+
+    Returns:
+        A compiled state graph representing the mortgage application workflow
+    """
+    builder = StateGraph(MortgageState)
+
+    # Add all nodes
+    builder.add_node("info_gathering_node", info_gathering_node)
+    builder.add_node("verify_user_info_node", verify_user_info_node)
+    builder.add_node("start_application_node", start_application_node)
+    builder.add_node("home_details_node", home_details_node)
+    builder.add_node("home_price_node", home_price_node)
+    builder.add_node("personal_info_node", personal_info_node)
+    builder.add_node("contact_info_node", contact_info_node)
+    builder.add_node("military_status_node", military_status_node)
+    builder.add_node("finances_node", finances_node)
+    builder.add_node("income_node", income_node)
+    builder.add_node("funds_node", funds_node)
+    builder.add_node("credit_info_node", credit_info_node)
+    builder.add_node("pull_credit_node", pull_credit_node)
+    builder.add_node("affordability_amount_node", affordability_amount_node)
+
+    # Set entry point - start with information gathering
+    builder.set_entry_point("info_gathering_node")
+
+    # Add edges for the happy path
+    builder.add_edge("info_gathering_node", "verify_user_info_node")
+    builder.add_edge("verify_user_info_node", "start_application_node")
+    builder.add_edge("start_application_node", "home_details_node")
+    builder.add_edge("home_details_node", "home_price_node")
+    builder.add_edge("home_price_node", "personal_info_node")
+    builder.add_edge("personal_info_node", "contact_info_node")
+    builder.add_edge("contact_info_node", "military_status_node")
+    builder.add_edge("military_status_node", "finances_node")
+    builder.add_edge("finances_node", "income_node")
+    builder.add_edge("income_node", "funds_node")
+    builder.add_edge("funds_node", "credit_info_node")
+    builder.add_edge("credit_info_node", "pull_credit_node")
+    builder.add_edge("pull_credit_node", "affordability_amount_node")
+    builder.add_edge("affordability_amount_node", END)
+
+    # Add error recovery edges - these allow nodes to return to info gathering if needed
+    builder.add_edge("verify_user_info_node", "info_gathering_node")
+    builder.add_edge("start_application_node", "info_gathering_node")
+    builder.add_edge("home_details_node", "info_gathering_node")
+    builder.add_edge("home_price_node", "info_gathering_node")
+    builder.add_edge("personal_info_node", "info_gathering_node")
+    builder.add_edge("contact_info_node", "info_gathering_node")
+    builder.add_edge("military_status_node", "info_gathering_node")
+    builder.add_edge("income_node", "info_gathering_node")
+    builder.add_edge("funds_node", "info_gathering_node")
+    builder.add_edge("credit_info_node", "info_gathering_node")
+    builder.add_edge("pull_credit_node", "info_gathering_node")
+
+    # Add early completion path if user doesn't want to proceed
+    builder.add_edge("start_application_node", END)
+
+    # Compile the graph with persistence and any extra kwargs
+    mortgage_workflow = builder.compile(checkpointer=checkpointer, **kwargs)
+
+    return mortgage_workflow
+
+
+def make_graph(config: RunnableConfig = None) -> CompiledStateGraph:
+    """
+    Creates a compiled mortgage application workflow graph.
+
+    Args:
+        config: Configuration object containing user_id and checkpoint settings
+
+    Returns:
+        A compiled workflow graph for mortgage applications
+    """
+
+    # Create a config if none is provided
+    if not config:
+        config = create_config()
+
+    model = load_chat_model(MODEL)
+    checkpointer = MemorySaver()
+
+    # Initialize the mortgage workflow with model, tools, and checkpointer
+    mortgage_graph = build_mortgage_workflow(
+        model=model, tools=CACHED_TOOLS, checkpointer=checkpointer, debug=True
+    )
+
+    return mortgage_graph

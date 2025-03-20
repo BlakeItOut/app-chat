@@ -1,0 +1,316 @@
+{
+	"data": null,
+	"context": {
+		"rmLoanId": "5ee3ea05-a41e-4876-90e1-d2ec237d0bc0",
+		"rocketAccountId": null,
+		"primaryFirstName": "Sam",
+		"primaryLastName": "Partee",
+		"primaryEmail": "no@definitionofno.com",
+		"rmClientId": "b6d19e6f-3761-41fd-a188-be44480cf5e7",
+		"qls": "GMO_FT3LIOOU.1303312PSE",
+		"affiliateSubId": null,
+		"leadTypeCode": [
+			"RLHAP"
+		],
+		"prefillSource": null,
+		"isLoggedIn": false,
+		"isSignedIn": false,
+		"isSPA": false,
+		"isSpouseOnLoan": false,
+		"chatData": {
+			"firstName": "Sam",
+			"lastName": "Partee",
+			"email": "no@definitionofno.com",
+			"loanPurpose": "Purchase",
+			"state": "CA",
+			"phNumber": "1123223441",
+			"loanNumber": "0"
+		},
+		"analytics": {
+			"mortgage_current_living": "renter",
+			"entered_name": true,
+			"entered_email": true,
+			"entered_phone": true,
+			"text_opt_in": false,
+			"marital_status": "married",
+			"account_created": "no",
+			"mortgage_timeline": "getting_started",
+			"mortgage_time_to_purchase": "three_six_months",
+			"mortgage_found_home": false,
+			"mortgage_purchase_state": "CA",
+			"mortgage_property_use": "primary",
+			"mortgage_est_purchase_price": 1000000,
+			"military": false,
+			"mortgage_coborrower_type": "none",
+			"conversion_value": "30809.37167"
+		},
+		"featureFlags": {
+			"featureEnableAccountCreateModalWithAuth0": true,
+			"featureEnableRocketAssistChat": false,
+			"featureEnableLivChat": false,
+			"featureEnableHelSolutions": false,
+			"featureEnableWelcomeBanner": false,
+			"enableRefinanceFullFlow": false,
+			"enableRocketHomes": false
+		},
+		"fullFlowPhaseConfig": null,
+		"timeFrameToBuy": "Buying in 3 to 6 Months",
+		"loanList": [],
+		"loanPurpose": "Purchase",
+		"chatClientAttributes": {
+			"firstName": "Sam",
+			"lastName": "Partee",
+			"emailAddress": "no@definitionofno.com",
+			"loanPurpose": "Purchase",
+			"loanState": "CA",
+			"phoneNumber": "1123223441",
+			"loanNumber": "0",
+			"rocketAccountId": null,
+			"rmLoanId": "5ee3ea05-a41e-4876-90e1-d2ec237d0bc0",
+			"rmClientId": "b6d19e6f-3761-41fd-a188-be44480cf5e7"
+		},
+		"refinanceGoal": null,
+		"isDebtConSolution": false,
+		"avoData": {
+			"userId": "5ee3ea05-a41e-4876-90e1-d2ec237d0bc0",
+			"mortgagePropertyType": null,
+			"mortgageEstYearlyPropertyTaxes": null,
+			"mortgageEstYearlyHomeownersInsurance": null,
+			"mortgageZipCode": null,
+			"mortgageEstCashToBuy": null,
+			"mortgageEstMonthlyRentPayment": null,
+			"mortgageEstCurrentMonthlyPayment": null,
+			"mortgageRemainingTermInYears": null,
+			"accountCreated": null,
+			"accountType": null,
+			"creditPullType": null,
+			"creditPullConsent": false,
+			"creditPullTriggerSource": null,
+			"creditScore": 0,
+			"mortgagePropertyUse": "primary",
+			"mortgageStatusAtEngagement": "getting_started",
+			"mortgageTimeframeToBuy": "three_six_months",
+			"military": true,
+			"militaryAssociation": null,
+			"militaryVaDisabilityBenefits": false,
+			"coborrowerMilitary": false,
+			"coborrowerMilitaryAssociation": null,
+			"coborrowerMilitaryVaDisabilityBenefits": false,
+			"mortgageHasRea": false,
+			"mortgageDownPaymentFundsType": [],
+			"mortgageEstPurchasePrice": 1000000,
+			"mortgageEstDownPayment": null,
+			"mortgageEstHomeValue": null,
+			"mortgageDownPaymentAssistanceNeeded": null,
+			"employmentStatus": null,
+			"pastForeclosures": null,
+			"pastBankruptcy": null,
+			"enteredName": true,
+			"enteredPhone": true,
+			"enteredEmail": true,
+			"enteredCurrentAddress": true,
+			"enteredCoborrowerName": false,
+			"enteredCoborrowerPhone": false,
+			"enteredCoborrowerEmail": false,
+			"mortgageLoanNumberCreated": false,
+			"mortgageCurrentLivingSituation": "renter",
+			"mortgageFoundHome": false,
+			"mortgageHasBudget": false,
+			"mortgagePurchaseState": "CA",
+			"maritalStatus": "married",
+			"mortgageSellingHome": null,
+			"mortgageCurrentHomeUsage": null,
+			"mortgageSendToHomes": null,
+			"mortgageEnteredEstTaxes": false,
+			"mortgageEnteredEstInsurance": false,
+			"mortgageSellerCoveringCosts": null,
+			"mortgageEarnestDeposit": null,
+			"mortgageEarnestDepositAmount": null,
+			"mortgageReaEntered": false,
+			"mortgageCoborrowerType": "none",
+			"mortgageEstYearlyIncome": null,
+			"mortgageCoborrowerEstYearlyIncome": null,
+			"mortgageEnteredPropertyAddress": false,
+			"mortgageDownPaymentAssistance": null,
+			"userBirthYear": null,
+			"coborrowerBirthYear": null,
+			"mortgageEstCashOut": null,
+			"mortgageEstBalanceRemaining": null,
+			"mortgageDownPaymentGift": null,
+			"mortgageHasHoaDues": null,
+			"mortgageEstMonthlyHoaAmount": null,
+			"mortgagePropertyLienIsMortgage": null,
+			"mortgagePropertyLienSubjectProperty": null,
+			"mortgageHasCurrentVaLoan": null,
+			"mortgagePaymentIncludeTaxInsurance": null,
+			"mortgageEstCashOutChange": null,
+			"mortgageEstCashOutUpdates": null,
+			"mortgageNumberOfPropertyLiens": null,
+			"loanPurpose": "purchase",
+			"loanType": "mortgage",
+			"mortgageDecPrimaryResidence": null,
+			"mortgageDecOtherOwnershipPast3Years": null,
+			"mortgageDecRelationshipWithSeller": null,
+			"mortgageDecBorrowMoneyUndisclosed": null,
+			"mortgageDecAnotherMortgage": null,
+			"mortgageDecApplyNewCredit": null,
+			"mortgageDecLienOnProperty": null,
+			"mortgageDecGuarantorOnDebt": null,
+			"mortgageDecUnpaidCourtJudgments": null,
+			"mortgageDecDefaultOnLoan": null,
+			"mortgageDecLawsuitPersonalLiability": null,
+			"mortgageDecAvoidForeclosurePropertyTransfer": null,
+			"mortgageDecShortSale": null,
+			"mortgageDecForeclosurePast7Years": null,
+			"mortgageDecBankruptcyPast7Years": null,
+			"textOptIn": false,
+			"mortgageApprovalAmount": null,
+			"mortgageQualifiedDigitalClient": null,
+			"mortgageApprovalOutOfPocketCashNeeded": null,
+			"mortgageSuggestedAddFunds": null,
+			"mortgageSuggestedLowerPrice": null,
+			"mortgageEstDownPaymentChange": null,
+			"mortgageEstPurchasePriceChange": null,
+			"suggestedProduct": null,
+			"productOffer": null,
+			"rocketProductEligible": null,
+			"rocketCompany": "mortgage:us",
+			"funnelExperience": "rma:purchase",
+			"qlsource": "GMO_FT3LIOOU.1303312PSE",
+			"gcid": 0,
+			"firstPageVisited": "purchase/timeframe-to-buy",
+			"utmCampaign": null,
+			"utmContent": null,
+			"utmCta": null,
+			"utmMedium": null,
+			"utmSource": null,
+			"utmTerm": null,
+			"isAuthenticated": null,
+			"transactionTypeStarting": null,
+			"leadTypeCode": "RLHAP",
+			"loanNumber": "0",
+			"mortgagePaymentIncludePropertyTax": null,
+			"mortgagePaymentIncludeHomeownerInsurance": null,
+			"mortgageHasFloodInsurance": false,
+			"mortgageRefiPayOffExistingMortgage": null,
+			"mortgageExperience": null,
+			"userIntent": "buy_home",
+			"intent": null,
+			"subIntent": null,
+			"rvid": null,
+			"hasRaid": false,
+			"userGoal": "buy_home",
+			"militaryServiceType": null,
+			"militaryBranchOfService": null,
+			"coborrowerMilitaryBranchOfService": null,
+			"coborrowerMilitaryServiceType": null,
+			"creditPullSucceeded": null,
+			"creditReportStatus": null,
+			"creditReportType": null,
+			"enteredCoborrowerCurrentAddress": null,
+			"enteredCoborrowerPreviousAddress": null,
+			"enteredCoborrowerEmployerName": null,
+			"enteredCoborrowerJobTitle": null,
+			"enteredCoborrowerStartDate": null,
+			"enteredCoborrowerEndDate": null,
+			"enteredCoborrowerLineOfWork": null,
+			"estLoanAmount": null,
+			"leadType": null
+		}
+	},
+	"navigation": {
+		"currentUrl": "purchase/personal-info/marital-status",
+		"nextUrl": "purchase/finances",
+		"navBarState": [
+			{
+				"name": "Home info",
+				"subSections": [
+					{
+						"name": "Buying plans",
+						"routes": [
+							"purchase/home-info/buying-plans",
+							"purchase/home-info/buying-plans/home-details",
+							"purchase/home-info/buying-plans/home-price"
+						],
+						"enabled": true
+					},
+					{
+						"name": "Real estate agent",
+						"routes": [
+							"purchase/home-info/real-estate-agent"
+						],
+						"enabled": true
+					},
+					{
+						"name": "Current home",
+						"routes": [
+							"purchase/home-info/current-home/own-rent-address",
+							"purchase/home-info/current-home/home-use"
+						],
+						"enabled": true
+					}
+				],
+				"enabled": true
+			},
+			{
+				"name": "Personal info",
+				"interstitial": "purchase/personal-info",
+				"subSections": [
+					{
+						"name": "About you",
+						"routes": [
+							"purchase/personal-info/contact-info",
+							"purchase/personal-info/military-status",
+							"purchase/personal-info/military-status/more-info",
+							"purchase/personal-info/marital-status"
+						],
+						"enabled": true
+					}
+				],
+				"enabled": true
+			},
+			{
+				"name": "Finances",
+				"interstitial": "purchase/finances",
+				"subSections": [
+					{
+						"name": "Income",
+						"routes": [
+							"purchase/finances/income"
+						],
+						"enabled": false
+					},
+					{
+						"name": "Funds",
+						"routes": [
+							"purchase/finances/funds"
+						],
+						"enabled": false
+					}
+				],
+				"enabled": false
+			},
+			{
+				"name": "Credit info",
+				"interstitial": "purchase/credit-info",
+				"subSections": [
+					{
+						"name": "Soft credit check",
+						"routes": [
+							"purchase/credit-info/birthdate-SSN"
+						],
+						"enabled": false
+					}
+				],
+				"enabled": false
+			},
+			{
+				"name": "Chat with an expert",
+				"enabled": false,
+				"routes": [
+					"purchase/chat-with-expert/affordability-amount"
+				]
+			}
+		]
+	}
+}

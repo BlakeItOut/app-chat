@@ -73,6 +73,20 @@ class AvoData:
     mortgageCoborrowerType: str = "none"
     mortgageLoanNumberCreated: bool = True
     mortgageDownPaymentFundsType: List[str] = field(default_factory=list)
+    enteredName: bool = False
+    enteredPhone: bool = False
+    enteredEmail: bool = False
+    enteredCurrentAddress: bool = False
+    mortgageCurrentLivingSituation: Optional[str] = None
+    mortgageFoundHome: bool = False
+    mortgageHasBudget: bool = False
+    mortgagePurchaseState: Optional[str] = None
+    maritalStatus: Optional[str] = None
+    mortgageEstPurchasePrice: Optional[int] = None
+    creditPullSucceeded: Optional[bool] = None
+    creditReportStatus: Optional[str] = None
+    militaryBranchOfService: Optional[str] = None
+    militaryServiceType: Optional[str] = None
 
 
 @dataclass

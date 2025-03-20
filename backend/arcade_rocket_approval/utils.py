@@ -1,9 +1,11 @@
 import logging
 from functools import lru_cache
+from typing import Any, Generic, TypeVar
 
 from httpx import Client, HTTPStatusError
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
+from pydantic import BaseModel
 
 from arcade_rocket_approval.env import APPROVAL_BASE_URL
 
@@ -68,3 +70,52 @@ def load_chat_model(fully_specified_name: str) -> BaseChatModel:
     """
     provider, model = fully_specified_name.split("/", maxsplit=1)
     return init_chat_model(model, model_provider=provider)
+
+
+T = TypeVar("T")
+
+
+class Response(BaseModel, Generic[T]):
+    """Standard response format for all API operations"""
+
+    status: str
+    """Status of the operation, either 'success' or 'error'"""
+
+    message: str
+    """Human-readable message about the operation"""
+
+    data: T | None = None
+    """Optional data returned from the operation"""
+
+    raw_response: dict[str, Any] | None = None
+    """Raw JSON response from the API call"""
+
+    @classmethod
+    def success(
+        cls,
+        message: str,
+        data: T | None = None,
+        raw_response: dict[str, Any] | None = None,
+    ) -> "Response[T]":
+        """Create a success response"""
+        return cls(
+            status="success", message=message, data=data, raw_response=raw_response
+        )
+
+    @classmethod
+    def error(
+        cls,
+        message: str,
+        data: T | None = None,
+        raw_response: dict[str, Any] | None = None,
+    ) -> "Response[T]":
+        """Create an error response"""
+        return cls(
+            status="error", message=message, data=data, raw_response=raw_response
+        )
+
+
+# Helper function for handling common request exceptions
+def handle_request_exception(e: Exception) -> Response[None]:
+    """Create error response from exception"""
+    return Response.error(f"Request failed: {str(e)}")

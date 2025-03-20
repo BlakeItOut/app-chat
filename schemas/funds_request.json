@@ -1,0 +1,25 @@
+{
+  "primaryAssets": {
+    "proceedsFromHomeSale": {
+      "listingPrice": 0,
+      "currentBalance": 0
+    },
+    "banking": [
+      {
+        "bankAmount": 1232131,
+        "bankName": "401`",
+        "typeCode": "Retirement401K"
+      }
+    ],
+    "giftFunds": [
+      {
+        "giftAmount": 11111,
+        "source": "Spouse_Domestic_Partner"
+      }
+    ]
+  },
+  "spouseAssets": {
+    "banking": []
+  },
+  "rmLoanId": "5ee3ea05-a41e-4876-90e1-d2ec237d0bc0"
+}

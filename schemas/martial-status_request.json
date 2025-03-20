@@ -1,0 +1,5 @@
+{
+  "maritalStatus": "Married", // Married, Single
+  "isSpouseOnLoan": false, // Only relevant if maritalStatus is Married
+  "rmLoanId": "5ee3ea05-a41e-4876-90e1-d2ec237d0bc0"
+}
