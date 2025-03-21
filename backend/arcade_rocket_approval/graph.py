@@ -1,12 +1,7 @@
-import asyncio
-import os
 import uuid
 from typing import TYPE_CHECKING, Literal
 
-from dotenv import load_dotenv
-from langchain_arcade import ToolManager
 from langchain_core.language_models import BaseChatModel
-from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
@@ -15,63 +10,77 @@ from langgraph.graph import END, MessagesState, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command, interrupt
 
-from arcade_rocket_approval.agent.info_agent import get_user_info_agent
 from arcade_rocket_approval.api import (
-    Address,
     BankingAsset,
-    CurrentLivingSituation,
     PhoneNumber,
     PrimaryAssets,
     RocketUserContext,
     do_soft_credit_pull,
     set_contact_info,
     set_funds,
+    set_home_details,
+    set_home_price,
     set_income,
     set_military_status,
     set_personal_info,
+    start_application,
 )
-from arcade_rocket_approval.utils import load_chat_model
+from arcade_rocket_approval.defaults import (
+    CHECKPOINTER,
+    INFO_MODEL,
+    MODEL,
+    get_cached_tools,
+    load_chat_model,
+)
 
 if TYPE_CHECKING:
     from arcade_rocket_approval.graph import MortgageState
-
-
-load_dotenv()
-
-arcade_api_key = os.environ.get("ARCADE_API_KEY")
-arcade_base_url = os.environ.get("ARCADE_BASE_URL")
-openai_api_key = os.environ.get("OPENAI_API_KEY")
-
-INFO_MODEL = "openai/gpt-4o"
-MODEL = "openai/o3-mini"
-CACHED_TOOLS = []
-all_tools = [
-    "RocketApproval.RetrieveUserInformationFromGoogle",
-]
-
-CHECKPOINTER = MemorySaver()
-
-# Set up tools and models
-TOOLS_MANAGER = ToolManager(api_key=arcade_api_key, base_url=arcade_base_url)
-
-if not CACHED_TOOLS:
-    TOOLS_MANAGER.init_tools(tools=all_tools)
-    CACHED_TOOLS = TOOLS_MANAGER.to_langchain()
-
-
-# Run info gathering agent to collect user information
-# TODO cache this
-info_agent = get_user_info_agent(
-    model=load_chat_model(INFO_MODEL),
-    tools=CACHED_TOOLS,
-    checkpointer=CHECKPOINTER,
-)
+from arcade_rocket_approval.agent.info_agent import get_user_info_agent
 
 
 class MortgageState(MessagesState):
     rmLoanId: str | None = None
     user_id: str | None = None
     user_info: RocketUserContext | None = None
+
+
+def info_gathering_node(
+    state: MortgageState,
+    config: RunnableConfig,
+) -> Command[Literal["verify_user_info_node"]]:
+    """
+    This node initializes or runs the information gathering agent.
+    Once information is collected, it transitions to verification.
+    """
+
+    if state.get("error"):
+        # Add error message to guide the agent to fix the issue
+        state["messages"].append(
+            AIMessage(
+                content=f"I need to correct some information: {state['error']}. Please help me collect the right information."
+            )
+        )
+
+    # Run the info gathering agent
+    info_agent = get_user_info_agent(
+        model=load_chat_model(INFO_MODEL),
+        tools=get_cached_tools(),  # TODO cache this
+        checkpointer=CHECKPOINTER,
+    )
+
+    result = info_agent.invoke(input=state, config=config)
+
+    # Extract the user info from the result
+    user_info = result.get("user_info")
+
+    # Move to verification
+    return Command(
+        goto="verify_user_info_node",
+        update={
+            "user_info": user_info,
+            "messages": result.get("messages", []),
+        },
+    )
 
 
 def create_config(user_id: str = None) -> RunnableConfig:
@@ -92,7 +101,7 @@ def create_config(user_id: str = None) -> RunnableConfig:
 
 def verify_user_info_node(
     state: MortgageState,
-) -> Command[Literal["start_application_node", "info_gathering_node"]]:
+) -> Command[Literal["start_application_node"]]:
     """
     Presents the collected user information to the user for verification.
     If verified, proceed to start_application_node, otherwise return to info_gathering_node.
@@ -137,7 +146,7 @@ def verify_user_info_node(
 
 def start_application_node(
     state: MortgageState,
-) -> Command[Literal["home_details_node", "info_gathering_node", "__end__"]]:
+) -> Command[Literal["home_details_node", "__end__"]]:
     """
     Creates a new mortgage application using the collected user information.
     """
@@ -159,13 +168,8 @@ def start_application_node(
         ]
         return Command(goto="__end__", update={"messages": new_messages})
 
-    # Mock a start_application function since it wasn't provided
-    # In a real implementation, this would call an API
     try:
-        # Here, we'd call the API to start a new application
-        # For now, we'll just simulate it with a mock ID
-        rm_loan_id = f"RM{hash(state['user_info'].email) % 10000:04d}"
-
+        rm_loan_id = start_application()
         return Command(
             goto="home_details_node",
             update={"rmLoanId": rm_loan_id, "messages": messages},
@@ -184,7 +188,7 @@ def start_application_node(
 
 def home_details_node(
     state: MortgageState,
-) -> Command[Literal["home_price_node", "info_gathering_node", "__end__"]]:
+) -> Command[Literal["home_price_node", "__end__"]]:
     """
     This node corresponds to 'purchase/home-info/buying-plans/home-details'.
     For example, ask for home value, monthly payment, etc.
@@ -217,7 +221,7 @@ def home_details_node(
 
 def home_price_node(
     state: MortgageState,
-) -> Command[Literal["personal_info_node", "info_gathering_node", "__end__"]]:
+) -> Command[Literal["personal_info_node", "__end__"]]:
     """
     This node corresponds to 'purchase/home-info/buying-plans/home-price'.
     Ask for a bit more info about the purchase price if needed.
@@ -231,7 +235,9 @@ def home_price_node(
 
     try:
         # Process home price info
-        # set_home_price(rm_loan_id=state["rmLoanId"], price_info=user_input["value"])
+        response = set_home_price(
+            rm_loan_id=state["rmLoanId"], price_info=user_input["value"]
+        )
 
         # Next big section is "purchase/personal-info" (the interstitial)
         return Command(goto="personal_info_node", update={"messages": messages})
@@ -249,7 +255,7 @@ def home_price_node(
 
 def personal_info_node(
     state: MortgageState,
-) -> Command[Literal["contact_info_node", "info_gathering_node", "__end__"]]:
+) -> Command[Literal["contact_info_node", "__end__"]]:
     """
     This would correspond to 'purchase/personal-info' before we jump to contact info routes, etc.
     """
@@ -308,7 +314,7 @@ def personal_info_node(
 
 def contact_info_node(
     state: MortgageState,
-) -> Command[Literal["military_status_node", "info_gathering_node", "__end__"]]:
+) -> Command[Literal["military_status_node", "__end__"]]:
     """
     'purchase/personal-info/contact-info'
     Ask user for phone, email, etc.
@@ -383,7 +389,7 @@ def contact_info_node(
 
 def military_status_node(
     state: MortgageState,
-) -> Command[Literal["finances_node", "info_gathering_node", "__end__"]]:
+) -> Command[Literal["finances_node", "__end__"]]:
     """
     'purchase/personal-info/military-status'
     Possibly ask if user is military, etc.
@@ -438,7 +444,7 @@ def military_status_node(
 
 def finances_node(
     state: MortgageState,
-) -> Command[Literal["income_node", "info_gathering_node", "__end__"]]:
+) -> Command[Literal["income_node", "__end__"]]:
     """
     'purchase/finances' as an interstitial or direct route
     """
@@ -454,7 +460,7 @@ def finances_node(
 
 def income_node(
     state: MortgageState,
-) -> Command[Literal["funds_node", "info_gathering_node", "__end__"]]:
+) -> Command[Literal["funds_node", "__end__"]]:
     """
     'purchase/finances/income'
     """
@@ -507,7 +513,7 @@ def income_node(
 
 def funds_node(
     state: MortgageState,
-) -> Command[Literal["credit_info_node", "info_gathering_node", "__end__"]]:
+) -> Command[Literal["credit_info_node", "__end__"]]:
     """
     'purchase/finances/funds'
     """
@@ -568,7 +574,7 @@ def funds_node(
 
 def credit_info_node(
     state: MortgageState,
-) -> Command[Literal["pull_credit_node", "info_gathering_node", "__end__"]]:
+) -> Command[Literal["pull_credit_node", "__end__"]]:
     """
     'purchase/credit-info'
     """
@@ -584,7 +590,7 @@ def credit_info_node(
 
 def pull_credit_node(
     state: MortgageState,
-) -> Command[Literal["affordability_amount_node", "info_gathering_node", "__end__"]]:
+) -> Command[Literal["affordability_amount_node", "__end__"]]:
     """
     'purchase/credit-info/birthdate-SSN'
     Ask for minimal data to do a soft credit pull, if needed.
@@ -613,7 +619,8 @@ def pull_credit_node(
                     update={
                         "messages": [
                             AIMessage(
-                                content=f"I encountered an error with your credit information: {response.message}. Let's gather more information."
+                                content=f"I encountered an error with your credit information: \
+                                    {response.message}. Let's gather more information."
                             )
                         ],
                         "error": response.message,
@@ -653,36 +660,6 @@ def affordability_amount_node(state: MortgageState) -> Command[Literal["__end__"
     return Command(goto="__end__", update={"messages": messages})
 
 
-def info_gathering_node(
-    state: MortgageState,
-) -> Command[Literal["verify_user_info_node"]]:
-    """
-    This node initializes or runs the information gathering agent.
-    Once information is collected, it transitions to verification.
-    """
-
-    if state.get("error"):
-        # Add error message to guide the agent to fix the issue
-        state["messages"].append(
-            AIMessage(
-                content=f"I need to correct some information: {state['error']}. Please help me collect the right information."
-            )
-        )
-
-    # Run the info gathering agent
-    result = info_agent.invoke(input=state)
-
-    # Extract the user info from the result
-    user_info = result.get("user_info")
-
-    # Move to verification
-    return Command(
-        goto="verify_user_info_node",
-        update={
-            "user_info": user_info,
-            "messages": result.get("messages", []),
-        },
-    )
 
 
 ################################################################################
@@ -726,38 +703,6 @@ def build_mortgage_workflow(
     # Set entry point - start with information gathering
     builder.set_entry_point("info_gathering_node")
 
-    # Add edges for the happy path
-    builder.add_edge("info_gathering_node", "verify_user_info_node")
-    builder.add_edge("verify_user_info_node", "start_application_node")
-    builder.add_edge("start_application_node", "home_details_node")
-    builder.add_edge("home_details_node", "home_price_node")
-    builder.add_edge("home_price_node", "personal_info_node")
-    builder.add_edge("personal_info_node", "contact_info_node")
-    builder.add_edge("contact_info_node", "military_status_node")
-    builder.add_edge("military_status_node", "finances_node")
-    builder.add_edge("finances_node", "income_node")
-    builder.add_edge("income_node", "funds_node")
-    builder.add_edge("funds_node", "credit_info_node")
-    builder.add_edge("credit_info_node", "pull_credit_node")
-    builder.add_edge("pull_credit_node", "affordability_amount_node")
-    builder.add_edge("affordability_amount_node", END)
-
-    # Add error recovery edges - these allow nodes to return to info gathering if needed
-    builder.add_edge("verify_user_info_node", "info_gathering_node")
-    builder.add_edge("start_application_node", "info_gathering_node")
-    builder.add_edge("home_details_node", "info_gathering_node")
-    builder.add_edge("home_price_node", "info_gathering_node")
-    builder.add_edge("personal_info_node", "info_gathering_node")
-    builder.add_edge("contact_info_node", "info_gathering_node")
-    builder.add_edge("military_status_node", "info_gathering_node")
-    builder.add_edge("income_node", "info_gathering_node")
-    builder.add_edge("funds_node", "info_gathering_node")
-    builder.add_edge("credit_info_node", "info_gathering_node")
-    builder.add_edge("pull_credit_node", "info_gathering_node")
-
-    # Add early completion path if user doesn't want to proceed
-    builder.add_edge("start_application_node", END)
-
     # Compile the graph with persistence and any extra kwargs
     mortgage_workflow = builder.compile(checkpointer=checkpointer, **kwargs)
 
@@ -784,7 +729,7 @@ def make_graph(config: RunnableConfig = None) -> CompiledStateGraph:
 
     # Initialize the mortgage workflow with model, tools, and checkpointer
     mortgage_graph = build_mortgage_workflow(
-        model=model, tools=CACHED_TOOLS, checkpointer=checkpointer, debug=True
+        model=model, tools=get_cached_tools(), checkpointer=checkpointer, debug=True
     )
 
     return mortgage_graph

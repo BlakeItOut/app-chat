@@ -1,179 +1,232 @@
-from typing import Any, Dict, List, Literal
+import json
+import logging
+from typing import Any, List, Literal
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import ToolMessage
-from langchain_core.prompts import PromptTemplate
-from langchain_core.runnables import RunnableConfig
+from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool
-from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import END, MessagesState, StateGraph
+from langchain_core.utils.function_calling import convert_to_openai_tool
+from langgraph.graph import MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
-from langgraph.types import Command
+from langgraph.types import Command, interrupt
 
-from arcade_rocket_approval.api import RocketUserContext
+from arcade_rocket_approval.api import (
+    ContactInfo,
+    CurrentLivingSituation,
+    HomePurchase,
+    PersonalInfo,
+    PrimaryAssets,
+    RocketUserContext,
+    SpouseAssets,
+)
+from arcade_rocket_approval.defaults import (
+    INFO_MODEL,
+    get_cached_tools,
+    load_chat_model,
+)
+from arcade_rocket_approval.prompts import (
+    EXTERNAL_SERVICE_PROMPT,
+    QUESTION_INFO_AGENT_PROMPT,
+    SUMMARIZER_PROMPT,
+)
+
+# Add logger
+logger = logging.getLogger(__name__)
+
+DISCOVERY_TURNS = 2
+
+DISCOVERY_QUESTIONS = [
+    "Tell me about yourself! What's your name? Address? The more the better",
+    "What's your annual income?",
+    "What's your current living situation? rent? own?",
+    "Have you been in the military? If so, what branch?",
+    "What's your current address?",
+    "What's your phone number?",
+    "What's your email?",
+]
+
+
+def get_question_model(model: str) -> Runnable:
+    llm = load_chat_model(model)
+    tools = [
+        convert_to_openai_tool(
+            t
+            for t in [
+                ContactInfo,
+                PersonalInfo,
+                CurrentLivingSituation,
+                HomePurchase,
+                PrimaryAssets,
+                SpouseAssets,
+            ]
+        )
+    ]
+    tool_names = [tool.name for tool in tools]
+    # Create a formatted system message first
+    system_message = QUESTION_INFO_AGENT_PROMPT.partial(
+        tools="\n".join(tool_names),
+        questions="\n".join(DISCOVERY_QUESTIONS),
+    )
+
+    # Now use that message with the model
+    return system_message | llm.bind_tools(
+        tools=tools, tool_choice="any", parallel_tool_calls=False
+    )
+
+
+def get_external_service_model(model: str) -> Runnable:
+    tools = get_cached_tools()
+    llm = load_chat_model(model)
+    return EXTERNAL_SERVICE_PROMPT | llm.bind_tools(
+        tools=tools, tool_choice="any", parallel_tool_calls=False
+    )
+
+def get_summarizer_model(model: str, context: str) -> Runnable:
+    llm = load_chat_model(model)
+    if isinstance(context, list):
+        context = "\n".join([str(item) for item in context])
+
+    prompt = SUMMARIZER_PROMPT.partial(context=context)
+    return prompt | llm
+
 
 DISCOVERY_TURNS = 7
 
 
 class MortgageInfoState(MessagesState):
     user_info: RocketUserContext | None = None
+    use_external: bool | None = None
 
 
-def get_user_info_agent(
-    model: BaseChatModel, tools: List[BaseTool], checkpointer: MemorySaver
-):
+def agent_node(
+    state: MortgageInfoState,
+    config: RunnableConfig,
+) -> Command[Literal["tools_call_node", "__end__"]]:
     """
-    A react agent that returns a structured output of the information
-    about the user that we need to submit a mortgage application.
-
-    This agent has a series of tools that it can use to get the information it needs
-    but it can also use the user's message to infer the information it needs.
+    This node decides whether to use the external service or not.
     """
-    # Create a comprehensive system prompt that guides the model
-    system_prompt = PromptTemplate.from_template(
-        """
-        You are a helpful assistant that helps gather information about a user
-        that we need to submit a mortgage application.
 
-        IMPORTANT: Always start the conversation by asking if the user would like to use external services
-        to speed up the onboarding process. This should be your very first question.
+    use_external = True
+    # if state.get("use_external") is None:
+    #    use_external = interrupt(
+    #        "Can we use an external service to help gather information? (Google)"
+    #    )
+    # else:
+    #    use_external = state.get("use_external")
 
-        Your goal is to collect all necessary information and return it in a structured format.
-        Ask clarifying questions one at a time. Use any available tools to help gather information.
-
-        The required information includes:
-        - Full name (first and last name)
-        - Email address
-        - Phone number
-        - Current address
-        - Current living situation (renting or owning)
-        - Annual income
-        - Military status
-        - Marital status
-        - Funds available for down payment
-
-        When you have all the required information, provide a complete summary with all collected details.
-
-        You have the following tools available to you:
-        {tools}
-
-        when you've used all the tools, you can return the structured output and end the conversation by
-        saying "all required information has been collected" or "summary" and a summary of the information.
-        """
-    ).partial(tools=tools)
-
-    # Force the model to use tools by passing tool_choice="any"
-    tool_model = model.bind_tools(tools, tool_choice="any", parallel_tool_calls=False)
-    model_with_tools = system_prompt | tool_model
-
-    # summarizer
-    summarizer_prompt = PromptTemplate.from_template(
-        """
-        Based on the collected user information, summarize it in a concise manner.
-        The context below will be a ToolMessage with some kind of information about the
-        user. Provide a summary of the information in the context keeping in mind
-        the fields needed for a RocketUserContext.
-
-        Context:
-        {context}
-
-        ALWAYS start your response with "Summary: "
-
-        Summary:
-        """
-    )
-    summarizer_model = summarizer_prompt | model
-    # Create a structured output model for the final response
-    structured_output_prompt = PromptTemplate.from_template(
-        """
-        Based on the collected user information, format it as a structured response
-        following the RocketUserContext format.
-
-        Return ONLY the structured data with no additional text.
-        """
-    )
-    model_with_structured_output = model.with_structured_output(RocketUserContext)
-    structured_output_model = structured_output_prompt | model_with_structured_output
-
-    def gather_info_node(
-        state: MortgageInfoState,
-        config: RunnableConfig,
-    ) -> Command[Literal["process_info_node"]]:
-        """
-        This node calls the model to generate a response based on the conversation so far.
-        If the model calls a tool, we go to the tools node. Otherwise, we go to process_info_node.
-        """
-        messages = state.get("messages", [])
-
-        # Check for conversation length to prevent infinite loops
-        # If we've gone back and forth many times, we likely have enough information
-        if len(messages) > DISCOVERY_TURNS:
-            return Command(
-                goto="process_info_node",
-                update={"messages": messages},
-            )
-
-        # Call the standard model to generate conversational response
-        response = model_with_tools.invoke({"messages": messages}, config=config)
-
-        # Try to extract structured information to check completeness
-        try:
-            print(
-                extract_tool_message_contents(messages + [response]),
-                "--------------------------------",
-            )
-            summary = summarizer_model.invoke(
-                {"context": extract_tool_message_contents(messages + [response])},
-                config=config,
-            )
-
-            # If we have all required fields or the model indicates completion, proceed
-            if summary.content.strip().lower().startswith("summary"):
-                return Command(
-                    goto="process_info_node",
-                    update={"messages": summary},
-                )
-        except Exception as e:
-            # If we can't extract structured data yet, that's okay
-            print(f"Info extraction not yet complete: {e}")
-
-        # Continue the conversation - the user will need to respond
+    if use_external:
         return Command(
-            goto="tools",
-            update={"messages": response},
+            goto="tools_call_node",
+            update={"use_external": use_external},
         )
-
-    def process_info_node(
-        state: MortgageInfoState,
-        config: RunnableConfig,
-    ) -> Command[Literal["__end__"]]:
-        """
-        Process all information gathered so far and create a structured output.
-        """
-        messages = state.get("messages", [])
-
-        # Generate structured output from conversation
-        user_info = structured_output_model.invoke(
-            {"messages": messages[0].content}, config=config
-        )
+    else:
         return Command(
             goto="__end__",
-            update={"user_info": user_info, "messages": messages},
+            update={"messages": state.get("messages", [])},
         )
 
+def tool_call_node(
+    state: MortgageInfoState,
+    config: RunnableConfig,
+) -> Command[Literal["tools"]]:
+    """
+    This node calls the external service.
+    """
+    model = get_external_service_model(config.get("model", INFO_MODEL))
+    response = model.invoke({"input": state.get("messages", [])}, config=config)
+
+    return Command(
+        goto="tools",
+        update={"messages": response},
+    )
+
+
+def tool_parse_node(
+    state: MortgageInfoState,
+    config: RunnableConfig,
+) -> Command[Literal["should_continue"]]:
+    response = state.get("messages", [])
+
+    # look for ToolMessage
+    tool_message = None
+    for message in response:
+        if isinstance(message, ToolMessage):
+            tool_message = message
+            break
+
+    if tool_message:
+        data = tool_message.content
+        if data:
+            try:
+                data = RocketUserContext.model_validate(data, strict=False)
+
+                return Command(
+                    goto="should_continue",
+                    update={"messages": response, "user_info": data},
+                )
+            except Exception as e:
+                logger.error(f"Error validating user info: {e}")
+
+    return Command(
+        goto="should_continue",
+        update={"messages": response},
+    )
+
+
+def gather_info_node(
+    state: MortgageInfoState,
+    config: RunnableConfig,
+) -> Command[Literal["should_continue"]]:
+    """
+    This node calls the model to generate a response based on the conversation so far.
+    """
+    messages = state.get("messages", [])
+
+    # Call the standard model to generate conversational response
+    model = get_question_model(config.get("model", INFO_MODEL))
+    response = model.invoke({"input": messages[0].content}, config=config)
+
+    return Command(
+        goto="should_continue",
+        update={"messages": response},
+    )
+
+
+def should_continue_node(
+    state: MortgageInfoState,
+    config: RunnableConfig,
+) -> Command[Literal["__end__", "agent_node"]]:
+    messages = state.get("messages", [])
+
+    if state.get("user_info") is None:
+        return Command(
+            goto="agent_node",
+            update={"messages": messages},
+        )
+
+    return Command(
+        goto="__end__",
+        update={"messages": messages},
+    )
+
+def get_user_info_agent(
+    model: BaseChatModel, tools: List[BaseTool], checkpointer
+) -> Runnable:
     # Define the graph workflow
     workflow = StateGraph(MortgageInfoState)
 
     # Add nodes
     workflow.add_node("tools", ToolNode(tools))
-    workflow.add_node("process_info_node", process_info_node)
     workflow.add_node("gather_info_node", gather_info_node)
+    workflow.add_node("should_continue", should_continue_node)
+    workflow.add_node("agent_node", agent_node)
+    workflow.add_node("tools_call_node", tool_call_node)
+    workflow.add_node("tool_parse_node", tool_parse_node)
 
-    workflow.add_edge("gather_info_node", "tools")
-    workflow.add_edge("tools", "process_info_node")
-    workflow.add_edge("process_info_node", END)
-
-    workflow.set_entry_point("gather_info_node")
+    workflow.add_edge("tools", "tool_parse_node")
+    workflow.add_edge("tool_parse_node", "should_continue")
+    workflow.set_entry_point("agent_node")
 
     graph = workflow.compile(checkpointer=checkpointer, debug=True)
 
@@ -184,10 +237,8 @@ def extract_tool_message_contents(messages: List[Any]) -> str:
     """
     Extracts content from all ToolMessages in a list of messages and
     combines them into a single string separated by double newlines.
-
     Args:
         messages: A list of message objects which may include ToolMessages
-
     Returns:
         A string containing all ToolMessage contents joined by double newlines
     """
@@ -203,3 +254,39 @@ def extract_tool_message_contents(messages: List[Any]) -> str:
 
     # Join all tool message contents with double newlines
     return "\n\n".join(tool_contents)
+
+
+def get_default_rocket_user_context() -> RocketUserContext:
+    return RocketUserContext(
+        personal_info=PersonalInfo(
+            first_name="",
+            last_name="",
+            date_of_birth="",
+            marital_status="Single",
+            is_spouse_on_loan=False,
+        ),
+        contact_info=ContactInfo(
+            first_name="",
+            last_name="",
+            date_of_birth=None,
+            email="",
+            phone_number=None,
+            has_promotional_sms_consent=False,
+        ),
+        phone_number=None,
+        address=None,
+        living_situation=CurrentLivingSituation(
+            rent_or_own="Renter",
+            address=None,
+        ),
+        home_purchase=HomePurchase(has_budget=False),
+        primary_assets=PrimaryAssets(),
+        spouse_assets=SpouseAssets(),
+        marital_status="Single",
+        income=None,
+        military_status=None,
+        real_estate_agent=None,
+        home_details=None,
+        ideal_home_price=None,
+        has_promotional_sms_consent=False,
+    )

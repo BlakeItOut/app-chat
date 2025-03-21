@@ -10,8 +10,23 @@ from arcade_rocket_approval.utils import (
 )
 
 
+class BaseSchema(BaseModel):
+    @property
+    def required_fields(self) -> list[str]:
+        return ["rmLoanId"] + [
+            k for k in self.to_api_format().keys() if k != "rmLoanId"
+        ]
+
+    def to_api_format(self) -> dict[str, Any]:
+        raise NotImplementedError("Subclasses must implement this method")
+
+    @property
+    def missing_fields(self, dict_obj: dict[str, Any]) -> list[str]:
+        return [field for field in self.required_fields if field not in dict_obj]
+
+
 # Schema definitions
-class PhoneNumber(BaseModel):
+class PhoneNumber(BaseSchema):
     """User's phone number"""
 
     area_code: str
@@ -27,7 +42,7 @@ class PhoneNumber(BaseModel):
         return {"areaCode": self.area_code, "prefix": self.prefix, "line": self.line}
 
 
-class ContactInfo(BaseModel):
+class ContactInfo(BaseSchema):
     """User's contact information"""
 
     first_name: str
@@ -45,9 +60,6 @@ class ContactInfo(BaseModel):
     phone_number: PhoneNumber
     """User's phone number"""
 
-    has_promotional_sms_consent: bool
-    """Whether the user has consented to promotional SMS messages"""
-
     def to_api_format(self) -> dict[str, Any]:
         return {
             "firstName": self.first_name,
@@ -55,11 +67,10 @@ class ContactInfo(BaseModel):
             "dateOfBirth": self.date_of_birth,
             "email": self.email,
             "phoneNumber": self.phone_number.to_api_format(),
-            "hasPromotionalSmsConsent": self.has_promotional_sms_consent,
         }
 
 
-class Address(BaseModel):
+class Address(BaseSchema):
     """User's address"""
 
     street: str
@@ -87,7 +98,7 @@ class Address(BaseModel):
         }
 
 
-class CurrentLivingSituation(BaseModel):
+class CurrentLivingSituation(BaseSchema):
     """User's current living situation"""
 
     rent_or_own: Literal["Renter", "Owner"]
@@ -100,7 +111,7 @@ class CurrentLivingSituation(BaseModel):
         return {"type": self.rent_or_own, "address": self.address.to_api_format()}
 
 
-class Location(BaseModel):
+class Location(BaseSchema):
     """Location of a property"""
 
     city: str
@@ -116,7 +127,7 @@ class Location(BaseModel):
         return {"city": self.city, "state": self.state, "zipCode": self.zip_code}
 
 
-class HomePurchase(BaseModel):
+class HomePurchase(BaseSchema):
     """User's future home purchase information"""
 
     has_budget: bool
@@ -136,7 +147,7 @@ class HomePurchase(BaseModel):
         }
 
 
-class BankingAsset(BaseModel):
+class BankingAsset(BaseSchema):
     """User's banking assets today"""
 
     bank_amount: int
@@ -156,7 +167,7 @@ class BankingAsset(BaseModel):
         }
 
 
-class GiftFund(BaseModel):
+class GiftFund(BaseSchema):
     """User's gift funds contributing to their overall wealth"""
 
     gift_amount: int
@@ -169,7 +180,7 @@ class GiftFund(BaseModel):
         return {"giftAmount": self.gift_amount, "source": self.source}
 
 
-class ProceedsFromHomeSale(BaseModel):
+class ProceedsFromHomeSale(BaseSchema):
     """User's proceeds from selling their current home"""
 
     listing_price: int
@@ -185,7 +196,7 @@ class ProceedsFromHomeSale(BaseModel):
         }
 
 
-class AssetGroup(BaseModel):
+class AssetGroup(BaseSchema):
     """Group of assets"""
 
     assets: list[BankingAsset] = Field(default_factory=list)
@@ -218,7 +229,7 @@ class SpouseAssets(AssetGroup):
     """Inherits banking assets from AssetGroup"""
 
 
-class Income(BaseModel):
+class Income(BaseSchema):
     """User's income"""
 
     annual_income: int
@@ -241,7 +252,7 @@ class Income(BaseModel):
         }
 
 
-class MilitaryStatus(BaseModel):
+class MilitaryStatus(BaseSchema):
     """User's military status"""
 
     military_status: Literal["Active Duty", "Reserve", "None"]
@@ -269,7 +280,7 @@ class MilitaryStatus(BaseModel):
         }
 
 
-class RealEstateAgent(BaseModel):
+class RealEstateAgent(BaseSchema):
     """Real estate agent information"""
 
     has_agent: bool
@@ -297,7 +308,7 @@ class RealEstateAgent(BaseModel):
         }
 
 
-class HomeDetails(BaseModel):
+class HomeDetails(BaseSchema):
     """User's home details"""
 
     location: Location
@@ -310,7 +321,7 @@ class HomeDetails(BaseModel):
     """Occupancy type"""
 
 
-class IdealHomePrice(BaseModel):
+class IdealHomePrice(BaseSchema):
     """Ideal home price"""
 
     desired_price: int
@@ -326,7 +337,7 @@ class IdealHomePrice(BaseModel):
         }
 
 
-class PersonalInfo(BaseModel):
+class PersonalInfo(BaseSchema):
     """User's personal information"""
 
     first_name: str
@@ -358,7 +369,7 @@ class PersonalInfo(BaseModel):
         return result
 
 
-class RocketUserContext(BaseModel):
+class RocketUserContext(BaseSchema):
     """
     Context for a Rocket Mortgage user.
     """
@@ -451,25 +462,6 @@ def start_application() -> Response[dict[str, str]]:
         )
     except (requests.exceptions.RequestException, ValueError) as e:
         return handle_request_exception(e)
-
-
-def get_purchase_application_status(rm_loan_id: str) -> Response[dict[str, str]]:
-    """
-    Retrieve the status of a purchase application by rmLoanId.
-    Calls GET /api/welcome/{rmLoanId}.
-    """
-    endpoint = f"/api/welcome/{rm_loan_id}"
-    headers = {"Content-Type": "application/json"}
-    try:
-        response = send_request(endpoint, "GET", headers=headers)
-        # For demonstration, we'll just return a mock string
-        return Response.success(
-            "Application status retrieved",
-            {"appStatus": "In Progress"},
-            raw_response=response,
-        )
-    except (requests.exceptions.RequestException, ValueError) as e:
-        return Response.error(f"Status unavailable: {str(e)}")
 
 
 def set_home_details(
