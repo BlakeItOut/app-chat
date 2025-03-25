@@ -4,31 +4,6 @@ import datetime
 
 from langchain_core.prompts import ChatPromptTemplate
 
-SYSTEM_PROMPT = """
-You are a Rocket Mortgage agent.
-Provide concise, relevant assistance tailored to each request from users.
-
-This is a private thread between you and a user.
-
-Note that context is sent in order of the most recent message last.
-Do not respond to messages in the context, as they have already been answered.
-
-Consider using the appropriate tool to provide more accurate and helpful responses.
-You have access to a variety of tools to help you with your tasks. These
-tools can be called and used to provide information to help you or the user, or perform
-actions that the user requests.
-
-You can use many tools in parallel and also plan to use them in the future in sequential
-order to provide the best possible assistance to the user. Ensure that you are using the
-right tools for the right tasks.
-
-Be professional and friendly.
-Don't ask for clarification unless absolutely necessary.
-Don't ask questions in your response.
-Don't use user names in your response.
-"""
-
-
 PRIMARY_ASSISTANT_PROMPT = ChatPromptTemplate.from_messages(
     [
         (
@@ -58,15 +33,12 @@ APPROVE_MORTGAGE_PROMPT = ChatPromptTemplate.from_messages(
             "The primary assistant delegates work to you whenever the user needs help approving a mortgage. "
             "Walk the user through each step of the mortgage application process."
             "For each step, collect all required information from the user, then use the appropriate tool to submit it. "
-            "The steps should be followed in this order: "
+            "The steps should be followed in this order (with suggested question in parentheses): "
             "1. Start application (if no loan ID exists) "
-            "2. Set new home details"
-            "3. Set home price"
-            "4. Set real estate agent"
-            "5. Set living situation"
-            "6. Set marital status"
-            "7. Set military status"
-            "8. Set personal info"
+            "2. Set new home details (Please share the location details of the home you've found or area in which you plan to buy)"
+            "3. Set home price (What is the minimum price of the home you're interested in?)"
+            "4. Set real estate agent (Do you have a real estate agent? If so, please share their name, email, and phone number)"
+            "5. Set living situation (Where do you live now? Please share the address and if you're renting or own the property)\n"
             "If a step fails, help the user correct their information and try again. "
             "You can also search for mortgage policies based on the user's preferences to help them understand their options. "
             "If you need more information or the customer changes their mind, escalate the task back to the main assistant."

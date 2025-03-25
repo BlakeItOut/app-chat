@@ -1,6 +1,7 @@
 import logging
 from typing import Any, Generic, TypeVar
 
+import httpx
 from httpx import Client, HTTPStatusError
 from pydantic import BaseModel
 
@@ -15,7 +16,7 @@ def send_request(
     json: dict | None = None,
     client: Client | None = None,
     cookies: dict | None = None,
-) -> tuple[str | None, dict]:
+) -> httpx.Response:
     """Send a request to the given URL with the given payload
 
     Args:
@@ -27,7 +28,7 @@ def send_request(
             client: The httpx client to use to send the request
             cookies: The cookies to send to the URL
     Returns:
-            A tuple containing the session token (if present) and the JSON response
+            The httpx response
     """
     if not client:
         client = Client(
@@ -47,8 +48,7 @@ def send_request(
         print(f"Response status code: {response.status_code}")
         print(f"Response headers: {response.headers}")
 
-        session_token = response.cookies.get("sessionToken")
-        return session_token, response.json()
+        return response
 
     except HTTPStatusError as e:
         if e.response.status_code == 401:
@@ -58,16 +58,6 @@ def send_request(
         else:
             logger.error("Error sending request to %s: %s", url, e)
         raise e
-
-
-# mock the send_request function
-def mock_send_request(
-    url: str,
-    method: str,
-    json: dict[str, Any] | None = None,
-    headers: dict[str, str] | None = None,
-) -> dict[str, Any]:
-    return {"context": {"rmLoanId": "1234567890"}}
 
 
 T = TypeVar("T")
@@ -111,7 +101,6 @@ class Response(BaseModel, Generic[T]):
         return cls(
             status="error", message=message, data=data, raw_response=raw_response
         )
-
 
 # Helper function for handling common request exceptions
 def handle_request_exception(e: Exception) -> Response[None]:

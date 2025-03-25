@@ -59,9 +59,7 @@ def create_rm_assistant(
         ]
     )
 
-    approve_mortgage_runnable, approve_mortgage_safe_tools, mortgage_nodes = (
-        get_mortgage_assistant(llm)
-    )
+    approve_mortgage_runnable, mortgage_nodes = get_mortgage_assistant(llm)
 
     # Each delegated workflow can directly respond to the user
     # When the user responds, we want to return to the currently active workflow
@@ -87,10 +85,7 @@ def create_rm_assistant(
     )
     builder.add_node("approve_mortgage", Assistant(approve_mortgage_runnable))
     builder.add_edge("enter_approve_mortgage", "approve_mortgage")
-    builder.add_node(
-        "approve_mortgage_safe_tools",
-        create_tool_node_with_fallback(approve_mortgage_safe_tools),
-    )
+
 
     # Add all mortgage tool nodes to the graph
     for node_name, node_func in mortgage_nodes.items():
@@ -99,7 +94,7 @@ def create_rm_assistant(
         builder.add_edge(node_name, "approve_mortgage")
 
     # Create list of conditional edges for approve_mortgage
-    conditional_edges = ["approve_mortgage_safe_tools", "leave_skill", END]
+    conditional_edges = ["leave_skill", END]
     # Add all tool node names to possible edges
     conditional_edges.extend(mortgage_nodes.keys())
 

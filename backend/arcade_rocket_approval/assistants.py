@@ -80,9 +80,18 @@ def create_mortgage_tool_node(
                         tool_call_id=tool_call_id,
                     )
                 ],
-                # "current_step": tool_name + "_node",
             }
 
+        if execute_response.output.error:
+            error_message = execute_response.output.error.message
+            return {
+                "messages": [
+                    ToolMessage(
+                        content=f"The tool failed with message: {error_message}\nPlease try again.",
+                        tool_call_id=tool_call_id,
+                    )
+                ],
+            }
         # Tool executed successfully
         result = execute_response.output.value if execute_response.output else {}
 
@@ -251,6 +260,8 @@ class ToApproveMortgage(BaseModel):
 ALL_TOOLS = {
     "RocketApproval.StartMortgageApplication": "RocketApproval.SetNewHomeDetails",
     "RocketApproval.SetNewHomeDetails": "RocketApproval.SetHomePrice",
+    "RocketApproval.SetHomePrice": "RocketApproval.SetRealEstateAgent",
+    "RocketApproval.SetRealEstateAgent": "RocketApproval.SetLivingSituation",
 }
 
 APPLICATION_NODES = {}
@@ -318,9 +329,8 @@ def get_mortgage_assistant(
     mortgage_nodes = APPLICATION_NODES
 
     # Create the mortgage assistant runnable
-    safe_mortgage_tools = [t for t in approve_mortgage_safe_tools]
     approve_mortgage_runnable = APPROVE_MORTGAGE_PROMPT | llm.bind_tools(
-        safe_mortgage_tools + [CompleteOrEscalate]
+        approve_mortgage_safe_tools + [CompleteOrEscalate]
     )
 
-    return approve_mortgage_runnable, approve_mortgage_safe_tools, mortgage_nodes
+    return approve_mortgage_runnable, mortgage_nodes
