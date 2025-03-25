@@ -1,8 +1,8 @@
 [tool.poetry]
 name = "arcade_rocket_approval"
-version = "0.0.1"
+version = "0.0.2"
 description = "Rocket Mortgage agent for guiding user through Rocket mortgage load application"
-authors = ["BlakeItOut <blakeshaw@rocketmortgage.com>"]
+authors = ["BlakeItOut <blakeshaw@rocketmortgage.com>", "Spartee <sam@arcade.dev>"]
 
 [tool.poetry.dependencies]
 python = "^3.10"
@@ -19,6 +19,7 @@ google-auth = "2.32.0"
 google-auth-httplib2 = "0.2.0"
 google-auth-oauthlib = "1.2.1"
 googleapis-common-protos = "1.63.2"
+trustcall = "0.0.38"
 
 
 [tool.poetry.dev-dependencies]

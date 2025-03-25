@@ -4,8 +4,6 @@ from typing import Any, Generic, TypeVar
 from httpx import Client, HTTPStatusError
 from pydantic import BaseModel
 
-from arcade_rocket_approval.env import APPROVAL_BASE_URL
-
 logger = logging.getLogger(__name__)
 
 
@@ -16,8 +14,8 @@ def send_request(
     headers: dict | None = None,
     json: dict | None = None,
     client: Client | None = None,
-    base_url: str | None = APPROVAL_BASE_URL,
-) -> dict:
+    cookies: dict | None = None,
+) -> tuple[str | None, dict]:
     """Send a request to the given URL with the given payload
 
     Args:
@@ -27,9 +25,9 @@ def send_request(
             headers: The headers to send to the URL
             json: The JSON data to send to the URL
             client: The httpx client to use to send the request
-
+            cookies: The cookies to send to the URL
     Returns:
-            The response from the URL
+            A tuple containing the session token (if present) and the JSON response
     """
     if not client:
         client = Client(
@@ -39,14 +37,18 @@ def send_request(
     try:
         logger.info(f"Sending request to {url} with method {method}")
 
+        if cookies:
+            client.cookies.set("sessionToken", cookies["sessionToken"])
+
         response = client.request(method, url, data=data, json=json)
         response.raise_for_status()
 
-        logger.info(f"Response: {response.json()}")
-        logger.info(f"Response status code: {response.status_code}")
-        logger.info(f"Response headers: {response.headers}")
+        print(f"Response: {response.json()}")
+        print(f"Response status code: {response.status_code}")
+        print(f"Response headers: {response.headers}")
 
-        return response.json()
+        session_token = response.cookies.get("sessionToken")
+        return session_token, response.json()
 
     except HTTPStatusError as e:
         if e.response.status_code == 401:
@@ -57,6 +59,15 @@ def send_request(
             logger.error("Error sending request to %s: %s", url, e)
         raise e
 
+
+# mock the send_request function
+def mock_send_request(
+    url: str,
+    method: str,
+    json: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    return {"context": {"rmLoanId": "1234567890"}}
 
 
 T = TypeVar("T")

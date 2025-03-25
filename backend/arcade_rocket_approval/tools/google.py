@@ -13,17 +13,8 @@ from typing import Annotated
 
 from arcade.sdk import ToolContext, tool
 from arcade.sdk.auth import Google
-from arcade.sdk.errors import ToolExecutionError
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-
-from arcade_rocket_approval.api import (
-    Address,
-    ContactInfo,
-    PersonalInfo,
-    PhoneNumber,
-    RocketUserContext,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -96,92 +87,9 @@ async def retrieve_user_information_from_google(
         .get(resourceName="people/me", personFields=ALL_PERSON_FIELDS)
         .execute()
     )
-
+    logger.info(f"Google response: {response}")
     try:
-        return extract_rocket_user_context_from_google_api(response)
-    except JSONDecodeError as e:
-        logger.exception("Failed to parse Google API JSON data")
-        raise ToolExecutionError("Failed to parse Google API JSON data")
+        return response
     except Exception as e:
-        logger.exception("Failed to return RocketUserContext from Google API")
-        raise ToolExecutionError("Failed to return RocketUserContext from Google API")
-
-
-def extract_rocket_user_context_from_google_api(json_data: str) -> str:
-    """
-    Parse Google API JSON response and extract fields relevant to RocketUserContext.
-
-    Args:
-        json_data: A string containing JSON data from Google People API
-
-    Returns:
-        A JSON string containing a partially populated RocketUserContext object
-    """
-    # Parse the JSON data
-    try:
-        data = json.loads(json_data)
-        person_data = data.get("person", {})
-
-        # Extract name information
-        names = person_data.get("names", [])
-        first_name = None
-        last_name = None
-        if names:
-            first_name = names[0].get("givenName")
-            last_name = names[0].get("familyName")
-
-        # Extract email information
-        emails = person_data.get("emailAddresses", [])
-        email = emails[0].get("value") if emails else None
-
-        # Extract and parse phone number
-        phones = person_data.get("phoneNumbers", [])
-        phone_number = None
-        if phones:
-            phone_str = phones[0].get("value", "")
-            # Parse phone number format like "(804) 840-4783"
-            import re
-
-            phone_match = re.search(r"\((\d{3})\)\s*(\d{3})-(\d{4})", phone_str)
-            if phone_match:
-                area_code, prefix, line = phone_match.groups()
-                phone_number = PhoneNumber(
-                    area_code=area_code, prefix=prefix, line=line
-                )
-
-        # Create PersonalInfo
-        personal_info = PersonalInfo(
-            first_name=first_name or "",
-            last_name=last_name or "",
-            date_of_birth="",  # Not available in the data
-            marital_status="Single",  # Default value
-            is_spouse_on_loan=False,  # Default value
-        )
-
-        # Create ContactInfo
-        contact_info = ContactInfo(
-            first_name=first_name or "",
-            last_name=last_name or "",
-            date_of_birth=None,
-            email=email or "",
-            phone_number=phone_number or PhoneNumber(area_code="", prefix="", line=""),
-            has_promotional_sms_consent=False,  # Default value
-        )
-
-        address = Address(
-            street=person_data.get("addresses", [{}])[0].get("streetAddress", ""),
-            city=person_data.get("addresses", [{}])[0].get("city", ""),
-            state=person_data.get("addresses", [{}])[0].get("state", ""),
-            zip_code=person_data.get("addresses", [{}])[0].get("postalCode", ""),
-        )
-
-        rocket_user_context = RocketUserContext(
-            contact_info=contact_info,
-            address=address,
-            personal_info=personal_info,
-        )
-        return rocket_user_context.model_dump_json()
-    except json.JSONDecodeError:
-        # Return empty RocketUserContext if JSON parsing fails
-        logger.exception("Failed to parse Google API JSON data")
-        raise ToolExecutionError("Failed to parse Google API JSON data")
+        logger.exception(f"Error dumping Google response: {e}")
+        return str(response)

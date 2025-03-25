@@ -3,6 +3,7 @@ from typing import Any, Literal
 import requests
 from pydantic import BaseModel, Field
 
+from arcade_rocket_approval.env import APPROVAL_BASE_URL
 from arcade_rocket_approval.utils import (
     Response,
     handle_request_exception,
@@ -440,12 +441,12 @@ def start_application() -> Response[dict[str, str]]:
     Create a purchase application and return the rmLoanId.
     We'll POST to /api/welcome, which returns an rmLoanId in the "context".
     """
-    endpoint = "/api/welcome"
+    endpoint = APPROVAL_BASE_URL + "/api/welcome"
     headers = {"Content-Type": "application/json"}
     payload = {"loanPurpose": "Purchase"}
 
     try:
-        response = send_request(endpoint, "POST", json=payload, headers=headers)
+        token, response = send_request(endpoint, "POST", json=payload, headers=headers)
         if not isinstance(response, dict):
             return Response.error("Invalid response format")
 
@@ -457,7 +458,7 @@ def start_application() -> Response[dict[str, str]]:
 
         return Response.success(
             "Application started successfully",
-            {"rmLoanId": rm_loan_id},
+            {"rmLoanId": rm_loan_id, "sessionToken": token},
             raw_response=response,
         )
     except (requests.exceptions.RequestException, ValueError) as e:
@@ -472,7 +473,7 @@ def set_home_details(
     Update the 'home-info/buying-plans/home-details' endpoint for the application.
     POST /api/home-info/buying-plans/home-details with JSON including rmLoanId.
     """
-    endpoint = "/api/home-info/buying-plans/home-details"
+    endpoint = APPROVAL_BASE_URL + "/api/home-info/buying-plans/home-details"
     payload = {
         "rmLoanId": rm_loan_id,
         "homeDetails": home_details.to_api_format(),
@@ -490,7 +491,7 @@ def set_home_price(rm_loan_id: str, purchase: HomePurchase) -> Response[None]:
     Update the 'home-info/buying-plans/home-price' endpoint with rmLoanId and price.
     POST /api/home-info/buying-plans/home-price
     """
-    endpoint = "/api/home-info/buying-plans/home-price"
+    endpoint = APPROVAL_BASE_URL + "/api/home-info/buying-plans/home-price"
     payload = {"rmLoanId": rm_loan_id, "purchase": purchase.to_api_format()}
     headers = {"Content-Type": "application/json"}
     try:
@@ -508,7 +509,7 @@ def set_real_estate_agent(
     Set real estate agent information.
     POST /api/home-info/buying-plans/agent
     """
-    endpoint = "/api/home-info/buying-plans/agent"
+    endpoint = APPROVAL_BASE_URL + "/api/home-info/buying-plans/agent"
     payload = {
         "rmLoanId": rm_loan_id,
         "realEstateAgent": real_estate_agent.to_api_format(),
@@ -529,7 +530,7 @@ def set_living_situation(
     Set current living situation (own/rent) and address.
     POST /api/home-info/own-rent-address
     """
-    endpoint = "/api/home-info/own-rent-address"
+    endpoint = APPROVAL_BASE_URL + "/api/home-info/own-rent-address"
     payload = {
         "rmLoanId": rm_loan_id,
         "currentLivingSituation": living_situation.to_api_format(),
@@ -553,7 +554,7 @@ def set_personal_info(
     """
     Update personal info. We'll POST /api/personal-info
     """
-    endpoint = "/api/personal-info"
+    endpoint = APPROVAL_BASE_URL + "/api/personal-info"
 
     # Create the PersonalInfo object
     personal_info = PersonalInfo(
@@ -587,7 +588,7 @@ def set_contact_info(
     Update contact info. We'll POST /api/personal-info/contact-info
     Can accept either individual parameters or a ContactInfo object.
     """
-    endpoint = "/api/personal-info/contact-info"
+    endpoint = APPROVAL_BASE_URL + "/api/personal-info/contact-info"
 
     if contact_info:
         # Use the contact_info object if provided
@@ -630,7 +631,7 @@ def set_military_status(
     """
     Update user's military status. We'll POST /api/personal-info/military-status
     """
-    endpoint = "/api/personal-info/military-status"
+    endpoint = APPROVAL_BASE_URL + "/api/personal-info/military-status"
     payload = {
         "rmLoanId": rm_loan_id,
         "militaryStatus": military_status,
@@ -663,7 +664,7 @@ def set_marital_status(
     Set marital status information.
     POST /api/personal-info/marital-status
     """
-    endpoint = "/api/personal-info/marital-status"
+    endpoint = APPROVAL_BASE_URL + "/api/personal-info/marital-status"
     payload = {"rmLoanId": rm_loan_id, "maritalStatus": marital_status}
 
     if marital_status == "Married":
@@ -689,7 +690,7 @@ def set_income(
     """
     Update the user's annual income. We'll POST /api/finances/income
     """
-    endpoint = "/api/finances/income"
+    endpoint = APPROVAL_BASE_URL + "/api/finances/income"
     payload = {
         "rmLoanId": rm_loan_id,
         "annualIncome": annual_income,
@@ -723,7 +724,7 @@ def set_funds(
     """
     Update how the user will fund their down payment. We'll POST /api/finances/funds
     """
-    endpoint = "/api/finances/funds"
+    endpoint = APPROVAL_BASE_URL + "/api/finances/funds"
     payload = {"rmLoanId": rm_loan_id, "primaryAssets": primary_assets.to_api_format()}
 
     if spouse_assets:
@@ -747,7 +748,7 @@ def do_soft_credit_pull(
     Perform a soft credit pull using birthdate & SSN last 4.
     We'll POST /api/credit-info/birthdate-SSN
     """
-    endpoint = "/api/credit-info/birthdate-SSN"
+    endpoint = APPROVAL_BASE_URL + "/api/credit-info/birthdate-SSN"
     payload = {"rmLoanId": rm_loan_id, "birthdate": birthdate, "ssnLast4": ssn_last4}
 
     if full_ssn:
@@ -774,7 +775,7 @@ def create_account(
     Create a Rocket Mortgage account after completing the application steps.
     We'll POST /api/account-create with the necessary account information.
     """
-    endpoint = "/api/account-create"
+    endpoint = APPROVAL_BASE_URL + "/api/account-create"
     payload = {
         "clientFirstName": client_first_name,
         "clientLastName": client_last_name,

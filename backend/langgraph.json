@@ -3,7 +3,7 @@
 		"."
 	],
 	"graphs": {
-		"agent": "./arcade_rocket_approval/graph.py:make_graph"
+		"agent": "./arcade_rocket_approval/main.py:make_graph"
 	},
 	"env": ".env"
 }
