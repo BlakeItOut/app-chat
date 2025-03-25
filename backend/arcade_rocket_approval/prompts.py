@@ -74,7 +74,6 @@ APPROVE_MORTGAGE_PROMPT = ChatPromptTemplate.from_messages(
             "\nCurrent time: {time}."
             "\nCurrent loan ID: {current_rm_loan_id}"
             "\nCurrent step: {current_step}"
-            "\n\n ALWAYS ASK THE USER TO CONFIRM THEIR INFORMATION BEFORE USING THE TOOLS. THIS IS CRITICAL."
             "\n\nIf the user needs help, and none of your tools are appropriate for it, then "
             '"CompleteOrEscalate" the dialog to the host assistant. Do not waste the user\'s time. Do not make up invalid tools or functions.'
             "\n\nSome examples for which you should CompleteOrEscalate:\n"

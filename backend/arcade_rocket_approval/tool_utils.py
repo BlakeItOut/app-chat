@@ -1,9 +1,10 @@
-from typing import Any, Callable, Union
+from typing import Annotated, Any, Callable, Union
 
 from arcadepy import NOT_GIVEN, Arcade, AsyncArcade
 from arcadepy.types import ExecuteToolResponse, ToolDefinition
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool
+from langchain_core.tools.base import InjectedToolCallId
 from langgraph.types import Command
 from pydantic import BaseModel, Field, create_model
 
@@ -131,6 +132,7 @@ def create_tool_function(
     tool_def: ToolDefinition,
     args_schema: type[BaseModel],
     langgraph: bool = False,
+    next_step: str = None,
 ) -> Callable:
     """Create a callable function to execute an Arcade tool.
 
@@ -140,6 +142,7 @@ def create_tool_function(
         tool_def: The ToolDefinition of the tool to wrap.
         args_schema: The Pydantic model representing the tool's arguments.
         langgraph: Whether to enable LangGraph-specific behavior.
+        next_step: The next step to transition to after this tool completes.
 
     Returns:
         A callable function that executes the tool.
@@ -165,8 +168,11 @@ def create_tool_function(
             **kwargs: Tool input arguments.
 
         Returns:
-            The output from the tool execution.
+            The output from the tool execution or a Command object with state updates.
         """
+        # Extract tool_call_id directly from kwargs
+        tool_call_id = kwargs.pop("tool_call_id", None)
+
         user_id = config.get("configurable", {}).get("user_id") if config else None
 
         # check for non-infferable params in config
@@ -201,7 +207,30 @@ def create_tool_function(
             user_id=user_id if user_id is not None else NOT_GIVEN,
         )
 
-        return process_tool_execution_response(execute_response, tool_name, langgraph)
+        result = process_tool_execution_response(execute_response, tool_name, langgraph)
+
+        # If we're in LangGraph mode, return a Command object that updates the state
+        if langgraph:
+            # Extract rm_loan_id if available in the result
+            rm_loan_id = None
+            if isinstance(result, dict) and "rmLoanId" in result:
+                rm_loan_id = result["rmLoanId"]
+
+            # Return a Command with the state updates and the original result
+            update = {
+                "dialog_state": "mortgage_assistant",
+                "current_step": next_step,
+            }
+
+            if rm_loan_id:
+                update["current_rm_loan_id"] = rm_loan_id
+
+            return Command(
+                update=update,
+                tool_call_id=tool_call_id,
+            )
+
+        return result
 
     return tool_function
 

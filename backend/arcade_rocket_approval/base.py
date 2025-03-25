@@ -56,7 +56,7 @@ class State(TypedDict):
     ]
     current_rm_loan_id: Optional[str]
     current_step: Optional[str]
-
+    current_session_token: Optional[str]
 
 class Assistant:
     def __init__(self, runnable: Runnable):

@@ -114,11 +114,15 @@ def set_new_home_details(
     new_home_city: Annotated[str, "City of the new home"],
     new_home_state: Annotated[str, "State of the new home"],
     new_home_zip_code: Annotated[str, "Zip code of the new home"],
-    new_home_occupancy_type: Annotated[OccupancyType, "Type of occupancy"],
+    new_home_occupancy_type: Annotated[
+        OccupancyType, "Type of occupancy"
+    ] = OccupancyType.PRIMARY,
     found_new_home: Annotated[bool, "Whether the user has found a new home"] = False,
-    rm_loan_id: Annotated[str, "loan ID from start_mortgage_application"] = None,
+    rm_loan_id: Annotated[
+        str, "loan ID from start_mortgage_application", Inferrable(False)
+    ] = None,
     session_token: Annotated[
-        str, "session token from start_mortgage_application"
+        str, "session token from start_mortgage_application", Inferrable(False)
     ] = None,
 ) -> Annotated[dict[str, str], "response from API"]:
     """
@@ -126,12 +130,14 @@ def set_new_home_details(
     POST /api/home-info/buying-plans/home-details
     """
     client = Client(base_url=APPROVAL_BASE_URL)
-    client.headers["sessionToken"] = session_token
+    client.cookies.set("sessionToken", session_token)
 
     # assume user has not found a new home
     data = {"rmLoanId": rm_loan_id, "buyingPlans": found_new_home}
+
+    print(data)
     response = client.post("/api/home-info/buying-plans", json=data)
-    logger.info(f"response from API: {response.json()}")
+    print(f"response from API: {response.json()}")
 
     # even if the user has not found a new home, we need to record the location
     # that they plan to live in
@@ -146,7 +152,7 @@ def set_new_home_details(
         "occupancyType": new_home_occupancy_type.value,
     }
     response = client.post("/api/home-info/buying-plans/home-details", json=data)
-    logger.info(f"response from API: {response.json()}")
+    print(f"response from API: {response.json()}")
     return {
         "status": "success",
         "message": "Home details set successfully",

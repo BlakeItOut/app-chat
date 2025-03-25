@@ -23,18 +23,15 @@ from arcade_rocket_approval.base import (
 from arcade_rocket_approval.prompts import PRIMARY_ASSISTANT_PROMPT
 
 
-def check_application_state(config: RunnableConfig) -> Command:
+def check_application_state(state: State):
     """Check if the user has started an application.
 
     Returns:
         A Command to update the state with the application state.
     """
-    configuration = config.get("configurable", {})
-    rm_loan_id = configuration.get("rm_loan_id", None)
-    if not rm_loan_id:
-        raise ValueError("No rm_loan_id configured.")
-    # response = get_application_state(rm_loan_id)
-    return Command(update={"current_step": "start_application"})
+    if state.get("current_step"):
+        return {"dialog_state": ["approve_mortgage"]}
+    return {"dialog_state": "pop"}
 
 
 def route_primary_assistant(
@@ -62,7 +59,9 @@ def create_rm_assistant(
         ]
     )
 
-    approve_mortgage_runnable, approve_mortgage_safe_tools = get_mortgage_assistant(llm)
+    approve_mortgage_runnable, approve_mortgage_safe_tools, mortgage_nodes = (
+        get_mortgage_assistant(llm)
+    )
 
     # Each delegated workflow can directly respond to the user
     # When the user responds, we want to return to the currently active workflow
@@ -93,22 +92,34 @@ def create_rm_assistant(
         create_tool_node_with_fallback(approve_mortgage_safe_tools),
     )
 
+    # Add all mortgage tool nodes to the graph
+    for node_name, node_func in mortgage_nodes.items():
+        builder.add_node(node_name, node_func)
+        # Add edge from each tool node back to the mortgage assistant
+        builder.add_edge(node_name, "approve_mortgage")
+
+    # Create list of conditional edges for approve_mortgage
+    conditional_edges = ["approve_mortgage_safe_tools", "leave_skill", END]
+    # Add all tool node names to possible edges
+    conditional_edges.extend(mortgage_nodes.keys())
+
     builder.add_conditional_edges(
         "approve_mortgage",
         route_approve_mortgage,
-        [
-            "approve_mortgage_safe_tools",
-            "leave_skill",
-            END,
-        ],
+        conditional_edges,
     )
+
     # Primary assistant
     builder.add_node("primary_assistant", Assistant(assistant_runnable))
     builder.add_node(
         "primary_assistant_tools",
         create_tool_node_with_fallback(primary_assistant_tools),
     )
-    builder.add_edge(START, "primary_assistant")
+
+    builder.add_node("check_application", check_application_state)
+    builder.add_edge(START, "check_application")
+    builder.add_conditional_edges("check_application", route_to_workflow)
+
     # The assistant can route to one of the delegated assistants,
     # directly use a tool, or directly respond to the user
     builder.add_conditional_edges(
