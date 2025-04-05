@@ -1,0 +1,13 @@
+{
+  "rmLoanId": "5ee3ea05-a41e-4876-90e1-d2ec237d0bc0",
+  "currentLivingSituation": {
+    "type": "Renter",
+    "address": {
+      "street": "340 Fremont St",
+      "street2": "515",
+      "city": "San Francisco",
+      "state": "CA",
+      "zipCode": "94105"
+    }
+  }
+}

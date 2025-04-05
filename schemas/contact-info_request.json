@@ -1,0 +1,12 @@
+{
+  "rmLoanId": "5ee3ea05-a41e-4876-90e1-d2ec237d0bc0",
+  "firstName": "Sam",
+  "lastName": "Partee",
+  "email": "no@definitionofno.com",
+  "phoneNumber": {
+    "areaCode": "112",
+    "prefix": "322",
+    "line": "3441"
+  },
+  "hasPromotionalSmsConsent": false
+}

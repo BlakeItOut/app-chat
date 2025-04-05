@@ -1,0 +1,13 @@
+{
+    "data": null,
+    "navigation": {
+        "navBarState": null,
+        "currentUrl": "purchase/welcome",
+        "nextUrl": "purchase/welcome"
+    },
+    "context": {
+        "featureFlags": {
+            "featureEnableWelcomeBanner": false
+        }
+    }
+}
